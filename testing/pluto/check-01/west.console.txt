@@ -1,0 +1,55 @@
+/testing/guestbin/swan-prep
+west #
+ # Check the enum name tables
+west #
+ #
+west #
+ # Use CMP not DIFF.  When there's a difference, the output from diff
+west #
+ # mixed in with the output from comparing console.txt files looks too
+west #
+ # much like console.txt needs updating when it doesn't.
+west #
+ #
+west #
+ # To update OUTPUT.enumcheck.txt run something like:
+west #
+ # $ ./OBJ.linux.x86_64/testing/enumcheck/enumcheck > testing/enumcheck/OUTPUT.enumcheck.txt
+west #
+ # $ git diff
+west #
+ ipsec enumcheck > OUTPUT/enumcheck.out || echo "Enum check barfed"
+enumcheck: leak detective found no leaks
+west #
+ cmp ../../programs/enumcheck/OUTPUT.enumcheck.txt OUTPUT/enumcheck.out || echo "Does the file OUTPUT.enumcheck.txt need updating? See description.txt"
+west #
+ # other checks
+west #
+ ipsec jambufcheck > /dev/null || echo failed
+jambufcheck: leak detective found no leaks
+west #
+ ipsec timecheck > /dev/null || echo failed
+timecheck: leak detective found no leaks
+west #
+ ipsec hunkcheck > /dev/null || echo failed
+hunkcheck: leak detective found no leaks
+west #
+ ipsec dncheck > /dev/null || echo failed
+dncheck: leak detective found no leaks
+west #
+ ipsec keyidcheck > /dev/null || echo failed
+keyidcheck: leak detective found no leaks
+west #
+ ipsec asn1check > /dev/null || echo failed
+asn1check: leak detective found no leaks
+west #
+ ipsec vendoridcheck > /dev/null || echo failed
+vendoridcheck: Initializing NSS
+vendoridcheck: FIPS Mode: NO
+west #
+ # Need to disable DNS tests; localhost is ok
+west #
+ ipsec ipcheck --dns=hosts-file > /dev/null || echo failed
+ipcheck: leak detective found no leaks
+west #
+ 

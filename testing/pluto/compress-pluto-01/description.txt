@@ -1,0 +1,2 @@
+Basic pluto test, but now using compress=yes on both ends.
+

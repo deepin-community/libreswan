@@ -1,0 +1,42 @@
+/testing/guestbin/swan-prep
+east #
+ ip addr show dev eth0 | grep 192.0.200.254 || ip addr add 192.0.200.254/24 dev eth0:1
+east #
+ ip addr show dev eth0 | grep 192.0.201.254 || ip addr add 192.0.201.254/24 dev eth0:1
+east #
+ ip route show scope global | grep 192.0.100.0 || ip route add 192.0.100.0/24 via 192.1.2.45  dev eth1
+east #
+ ip route show scope global | grep 192.0.101.0 || ip route add 192.0.101.0/24 via 192.1.2.45  dev eth1
+east #
+ ipsec start
+Redirecting to: [initsystem]
+east #
+ ../../guestbin/wait-until-pluto-started
+east #
+ ipsec auto --add westnet-eastnet-ikev2a
+002 "westnet-eastnet-ikev2a": added IKEv2 connection
+east #
+ ipsec auto --add westnet-eastnet-ikev2b
+002 "westnet-eastnet-ikev2b": added IKEv2 connection
+east #
+ ipsec auto --add westnet-eastnet-ikev2c
+002 "westnet-eastnet-ikev2c": added IKEv2 connection
+east #
+ echo "initdone"
+initdone
+east #
+ ipsec whack --trafficstatus
+006 #8: "westnet-eastnet-ikev2a", type=ESP, add_time=1234567890, inBytes=84, outBytes=84, id='@west'
+006 #9: "westnet-eastnet-ikev2b", type=ESP, add_time=1234567890, inBytes=84, outBytes=84, id='@west'
+006 #10: "westnet-eastnet-ikev2c", type=ESP, add_time=1234567890, inBytes=84, outBytes=84, id='@west'
+east #
+ ipsec showstates
+000 #8: "westnet-eastnet-ikev2a":500 STATE_V2_ESTABLISHED_CHILD_SA (established Child SA); REKEY in XXs; REPLACE in XXs; newest; eroute owner; IKE SA #1; idle;
+000 #8: "westnet-eastnet-ikev2a" esp.ESPSPIi@192.1.2.45 esp.ESPSPIi@192.1.2.23 tun.0@192.1.2.45 tun.0@192.1.2.23 Traffic: ESPin=84B ESPout=84B ESPmax=0B 
+000 #9: "westnet-eastnet-ikev2b":500 STATE_V2_ESTABLISHED_CHILD_SA (established Child SA); REKEY in XXs; REPLACE in XXs; newest; eroute owner; IKE SA #1; idle;
+000 #9: "westnet-eastnet-ikev2b" esp.ESPSPIi@192.1.2.45 esp.ESPSPIi@192.1.2.23 tun.0@192.1.2.45 tun.0@192.1.2.23 Traffic: ESPin=84B ESPout=84B ESPmax=0B 
+000 #1: "westnet-eastnet-ikev2c":500 STATE_V2_ESTABLISHED_IKE_SA (established IKE SA); REKEY in XXs; REPLACE in XXs; newest; idle;
+000 #10: "westnet-eastnet-ikev2c":500 STATE_V2_ESTABLISHED_CHILD_SA (established Child SA); REKEY in XXs; REPLACE in XXs; newest; eroute owner; IKE SA #1; idle;
+000 #10: "westnet-eastnet-ikev2c" esp.ESPSPIi@192.1.2.45 esp.ESPSPIi@192.1.2.23 tun.0@192.1.2.45 tun.0@192.1.2.23 Traffic: ESPin=84B ESPout=84B ESPmax=0B 
+east #
+ 

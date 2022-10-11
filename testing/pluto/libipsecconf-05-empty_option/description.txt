@@ -1,0 +1,22 @@
+This tests for a bug with an empty option
+
+Originally, the empty option was accepted / ignored when at the end of
+the last connection:
+
+    conn last
+        rightsubnet=
+
+but fails when at the end of the non-last connection:
+
+    conn last
+        rightsubnet=
+    conn reallast
+        ...
+
+However, that is "fixed" in that this rule:
+
+	| KEYWORD EQUAL { /* this is meaningless, we ignore it */ }
+
+which is part of the grammar is able to always accept an empty option.
+
+Question now is, is that valid?

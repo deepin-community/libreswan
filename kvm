@@ -1,0 +1,424 @@
+#!/bin/sh
+
+set -e
+
+# possible hostnames, always implies first
+
+platforms="fedora freebsd netbsd openbsd"
+
+buildhosts=${platforms}
+basehosts=
+upgradehosts=
+for p in ${platforms} ; do
+    basehosts="${basehosts} ${p}-base ${p}-upgrade"
+    upgradehosts="${upgradehosts} ${p}-upgrade ${p}-upgrade"
+done
+
+# eat newlines
+testhosts=$(echo $($(dirname $0)/testing/utils/kvmhosts.sh))
+
+hosts="${testhosts} ${buildhosts} ${basehosts} ${upgradehosts}"
+
+# Anything matching '^____[-a-z]' is considered a command (_ denotes a
+# space).
+
+pass1help()
+{
+    cat <<EOF
+Modifiers:
+
+  Use the test directories that have been modified when running and
+  comparing tests:
+
+    modified
+	apply operation to modified tests (default is all tests)
+
+  When comparing results, specify the baseline directory to compare
+  against (default is Makefile.inc.local:KVM_BASELINE):
+
+    baseline
+	compare test results against baseline
+    baseline-passed
+	compare test results against baseline tests that passed
+    baseline-failed
+	compare test results against baseline tests that failed
+    --baseline <dir>
+	specify baseline directory to compare against
+    --baseline-passed <dir>
+	specify baseline directory to compare against
+    --baseline-failed
+	specify baseline directory to compare against
+
+  To log into a domain:
+
+    sh <host> [ <command> ]
+	start a shell on <host> which can be a:
+	  test domain: ${testhosts}
+	  build domain: ${platforms}
+	  base domain: ${basehosts}
+	  upgrade domain: ${upgradehosts}
+EOF
+}
+
+pass1=$(pass1help | awk '/^    [-a-z]/ { printf " %s ", $1 }' ; echo ${host})
+
+# Anything matching '^____[-a-z]' is considered a command (_ denotes a
+# space).
+
+pass2help()
+{
+    cat <<EOF
+  Set up the test environment:
+
+    install[-PLATFORM]
+	install libreswan onto the build domains,
+	and then create the test domains
+    uninstall[-PLATFORM]
+	delete the build and test domains
+	(but leave the build trees and base domains alone)
+
+  Run tests, examine results:
+
+    check [ <test-directory> ... ]
+	run the testsuite
+    recheck [ <test-directory> ... ]
+	re-run the testsuite
+    diffs [ <test-directory> ... ]
+	show differences (for the specified tests)
+	exit non-zero when differences are found
+    results [ <test-directory> ... ]
+	list test results (for the specified tests)
+	exit non-zero when failures are found
+
+  Prepare for a clean test run:
+
+    clean
+	clean the test environment (delete test and build domains and
+	build trees)
+    check-clean
+	delete the test results (leave the build trees and domains alone)
+    keys
+	update the keys used for testing
+
+  Update the expected test results (and GIT repository):
+
+    patch [ <test-directory> ... ]
+	apply test differences (to the specified test directories)
+    add [ <test-directory> ... ]
+	<<git add>> (the specified test directories)
+
+  Manipulate the kvmrunner process:
+
+    status
+	report the status of the running test
+    kill
+	kill the running testsuite
+
+  Clean up the test environment
+
+    base[-PLATFORM]
+	(re)build the base domain
+	creates: ${basehosts}
+    upgrade[-PLATFORM]
+	installs missing + upgrades existing packages on base domain
+	creates: ${upgradehosts}
+    transmogrify[-PLATFORM]
+	transmogrify the upgraded domains
+	creates: ${platforms}
+
+    downgrade[-PLATFORM]
+	delete the build and test domains
+	remove any updates to the base domains
+
+    purge
+	delete base, build and test domains
+	delete any build trees
+    demolish
+	delete all domains and all builds
+    shutdown
+	shutdown the domains
+EOF
+}
+
+pass2=$(pass2help | awk -v "plat=${platforms}" -- '
+BEGIN {
+	split(plat, platforms)
+}
+/^    [a-z]*.-PLATFORM.$/ {
+	t=$1
+	sub(/[^a-z]*$/,"",t)
+	printf " %s ", t
+	for (i in platforms) {
+		printf " %s-%s ", t, platforms[i]
+	}
+	next
+}
+/^    [-a-z]*/ {
+	printf " %s ", $1
+}')
+
+
+# Invoked by completer with:
+#
+#   $0 <command==$0> <word> <previous>?
+#
+# ${pass1}, ${pass2} and ${hosts} contain completion values.
+
+if test "$1" == $0 -a $# -eq 3 ; then
+    command=$1
+    word=$2
+    previous=$3
+    # hack to detect first vs later argument
+    if test "${previous}" == "${command}" ; then
+	# first command
+	compgen -W "${pass1} ${pass2}" "${word}" | sort
+    elif test "${previous}" == sh ; then
+	# pass 1 command
+	compgen -W "${hosts}" "${word}"
+    else
+	case $pass2 in
+	    *" ${word}"* )
+		# word looks to be matching a command (or is empty),
+		# expand to either <command> or <directory>
+		compgen -o plusdirs -W "${pass2}" "${word}"
+		;;
+	    * )
+		# doesn't match a command, so throw in the testing
+		# directory as a quick expansion
+		compgen -o plusdirs -W "${pass2}" -G "testing/pluto/${word}*" "${word}"
+		;;
+	esac
+    fi
+    exit 0
+fi
+
+# Translate ../../../kvm [...] into ./kvm [...] and with no [...]
+# implying "clean".  Do this before checking $#=0 as this can add the
+# missing parameter.
+
+if test $(realpath $(dirname $0)) != $(realpath ${PWD}) ; then
+    if test $# -eq 0 ; then
+	set -- check ${PWD}
+    else
+	declare -a args
+	i=0
+	for arg in "$@" ; do
+	    if test -d "${arg}" ; then
+		dir=true
+		args[$i]=$(realpath ${arg})
+	    elif test "${arg}" = check ; then
+		check=true
+		args[$i]="${arg}"
+	    else
+		args[$i]="${arg}"
+	    fi
+	    i=$((i + 1))
+	done
+	set -- "${args[@]}"
+    fi
+    cd $(dirname $0)
+    echo "$@"
+fi
+
+# Finally is there at least one parameter?
+
+if test $# -eq 0; then
+    cat <<EOF
+Usage:
+
+   <modifier> ... <operation> ... <test-directory> <test-directory> ...
+
+EOF
+    pass1help
+    echo
+    pass2help
+cat <<EOF
+
+To enable completion, add these lines to .bashrc:
+
+  complete -o filenames -C        ./kvm        ./kvm
+  complete -o filenames -C ../../../kvm ../../../kvm
+
+(the first is for top-level, the second for within a directory)
+EOF
+    exit 1
+fi
+
+# Accumulate pass 2 commands; execute pass 1 commands immediately.
+#
+# XXX: should "sh" be delayed so that "downgrade install sh netbsd"
+# DTRT?
+
+declare -a ops
+
+kvm_baseline=$(gmake print-kvm-baseline)
+kvm_test_status=$(gmake print-kvm-test-status)
+kvm_test_flags=$(gmake print-kvm-test-flags)
+kvm_prefixes=($(gmake print-kvm-prefixes))
+kvm_testingdir=$(gmake print-kvm-testingdir)
+
+modified=
+baseline=
+__baseline=${kvm_baseline:+--baseline ${kvm_baseline}}
+prefix=${kvm_prefixes[0]}
+
+i=0
+while test $# -gt 0 ; do
+    case " ${pass2} " in
+	*" $1 "* )
+	    # accumulate pass2 commands
+	    ops[$i]="$1" ; i=$((i + 1))
+	    ;;
+	* )
+	    # must be a pass1 command
+	    case "$1" in
+
+		--baseline* )
+		    baseline=$(expr $1 : '--\(.*\)')
+		    shift
+		    __baseline="--baseline $1"
+		    ;;
+
+		# aliases for pass2 commands
+		diff )   ops[$i]=diffs ;   i=$((i + 1)) ;;
+		result ) ops[$i]=results ; i=$((i + 1)) ;;
+		test   ) ops[$i]=check ;   i=$((i + 1)) ;;
+		retest ) ops[$i]=recheck ; i=$((i + 1)) ;;
+		test-clean ) ops[$i]=check-clean ; i=$((i + 1)) ;;
+
+		sh )
+		    shift
+		    host=${prefix}$1 ; shift
+		    echo "Connecting to ${host}" 1>&2
+		    exec testing/utils/kvmsh.py ${host} "$@"
+		    ;;
+
+		# wrappers
+		modified )
+		    modified=$(git status testing/pluto/ \
+				   | awk '/(modified|deleted|renamed):/ { print $NF }' \
+				   | grep '/.*/.*/' \
+				   | cut -d/ -f1-3 \
+				   | sort -u)
+		    if test -z "${modified}" ; then
+			echo "no modified tests" 1>&2
+			exit 1
+		    fi
+		    ;;
+
+		baseline | baseline-passed | baseline-failed )
+		    if test -z "${__baseline}" ; then
+			echo "no KVM_BASELINE" 1&2
+			exit 1
+		    fi
+		    baseline=$1
+		    ;;
+
+		* ) # either a directory; or a hostname
+		    case " ${hosts} " in
+
+			*" $1 "* )
+			    host=${prefix}$1 ; shift
+			    echo "Connecting to ${host}" 1>&2
+			    exec testing/utils/kvmsh.py ${host} "$@"
+			    ;;
+
+			* ) # check first trailing argument is a directory
+			    if test ! -d "$1" ; then
+				if test -z "${ops[*]}" ; then
+				    echo "unknown command: $1" 1>&2
+				else
+				    echo "not a directory: $1" 1>&2
+				fi
+				exit 1
+			    fi
+			    break
+		    esac
+	    esac
+	    ;;
+    esac
+    shift
+done
+
+if test -n "${modified}" ; then
+    if test -z "${ops[*]}" ; then
+	echo "${modified}"
+	exit 0
+    elif test $# -ne 0 ; then
+	echo "both modified and tests specified" 1>&2
+	exit 1
+    fi
+    set -- ${modified}
+elif test $# -eq 0 ; then
+    set -- ${kvm_testingdir}
+fi
+
+if test -z "${ops[*]}" ; then
+    echo "nothing to do!" 1>&2
+    exit 1
+fi
+
+results_command()
+{
+    if test -n "${baseline}" ; then
+	./testing/utils/kvmresults.py --test-status "${kvm_test_status}" ${kvm_test_flags} ${__baseline} "$@" \
+	    | grep --line-buffered -v -e baseline:untested \
+	    | grep --line-buffered -e ${baseline}
+    else
+	./testing/utils/kvmresults.py --test-status "${kvm_test_status}" ${kvm_test_flags} "$@"
+	status=$?
+    fi
+}
+
+diffs_command()
+{
+    if test -n "${baseline}" ; then
+	./testing/utils/kvmresults.py --test-status "${kvm_test_status}" ${kvm_test_flags} ${__baseline} --stats none "$@" \
+	    | grep --line-buffered -v -e baseline:untested \
+	    | grep --line-buffered -e "${baseline}" \
+	    | while read test eol ; do
+	    ./testing/utils/kvmresults.py --stats none --print diffs ${test}
+	done
+    else
+	./testing/utils/kvmresults.py --test-status "${kvm_test_status}" ${kvm_test_flags} --stats none --print diffs "$@"
+	status=$?
+    fi
+}
+
+# second pass
+status=0
+for op in "${ops[@]}" ; do
+    case ${op} in
+
+	add ) git add "$@" ;;
+
+	kill ) gmake kvm-${op} ;;
+	base* | upgrade* | transmogrify* | downgrade* )
+	    # downgrade-netbsd -> netbsd-downgrade
+	    o=$(echo ${op} | sed -e 's/\([a-z]*\)-\([a-z]*\)/\2-\1/')
+	    echo gmake kvm-${o}
+	    gmake kvm-${o} || exit $?
+	    ;;
+	demolish | purge | status | check-clean | shutdown | uninstall* | install* )
+	    echo gmake kvm-${op}
+	    gmake kvm-${op} || exit $?
+	    ;;
+	check | recheck )
+	    echo ${op}: "$@"
+	    gmake kvm-${op} KVM_TESTS="$*" || exit $?
+	    ;;
+	diffs )
+	    diffs_command "$@"
+	    ;;
+	results )
+	    results_command "$@"
+	    ;;
+	patch )
+	    diffs_command "$@" | patch -p1
+	    ;;
+	keys )
+	    gmake kvm-keys-clean kvm-keys
+    esac
+done
+
+exit ${status}

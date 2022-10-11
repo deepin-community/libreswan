@@ -1,0 +1,23 @@
+Tests: opportunistic
+Restrictions: needs-root, isolation-machine, needs-internet
+Depends:
+ dnsutils,
+ iputils-ping,
+ systemd,
+ wget,
+ @,
+
+Tests: cryptocheck
+Restrictions: allow-stderr
+Depends:
+ libnss3-tools,
+ @,
+
+Tests: cavp
+Restrictions: needs-internet, allow-stderr
+Depends:
+ bzip2,
+ ca-certificates,
+ diffutils,
+ wget,
+ @,

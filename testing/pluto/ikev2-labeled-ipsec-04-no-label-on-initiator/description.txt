@@ -1,0 +1,12 @@
+initiator has no label; responder does
+
+The connection should fail:
+
+- initiator tries to establish both an IKE and Child SA (with no
+  label) using the initial exchange (i.e., IKE_SA_INIT + IKE_AUTH)
+
+- responder authenticates (includes its own own proof in response);
+  but then rejects child because the missing TS label doesn't match
+
+- initiator authenticates and leaves the childless SA hanging
+

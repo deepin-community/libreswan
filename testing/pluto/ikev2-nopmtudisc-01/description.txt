@@ -1,0 +1,3 @@
+nopmtudisc testing - requires xfrm
+
+This is not negotiated. West sets this option

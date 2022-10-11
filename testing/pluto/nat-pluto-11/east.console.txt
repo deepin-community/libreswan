@@ -1,0 +1,17 @@
+/testing/guestbin/swan-prep
+east #
+ ipsec start
+Redirecting to: [initsystem]
+east #
+ ../../guestbin/wait-until-pluto-started
+east #
+ ipsec auto --add road-eastnet
+002 "road-eastnet": added IKEv1 connection
+east #
+ ipsec status |grep encaps:
+000 "road-eastnet":   nat-traversal: encaps:auto; keepalive:20s; ikev1-method:rfc+drafts
+east #
+ echo "initdone"
+initdone
+east #
+ 

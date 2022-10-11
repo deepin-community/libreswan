@@ -1,0 +1,4 @@
+basic OE connection but now we are excluding a specific port (the echo
+port (7)) from encryption.
+
+note: a tcpdump on nic shows the plain text.

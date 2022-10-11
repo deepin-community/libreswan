@@ -1,0 +1,91 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: libreswan
+Upstream-Contact: The Libreswan Project <swan-dev@lists.libreswan.org>
+Source: https://download.libreswan.org/
+Comment: Security contact: security@libreswan.org
+ Libreswan derives its copyright from Openswan. See CREDITS.openswan
+ Openswan derives its copyright from FreeS/WAN. See CREDITS.freeswan
+
+Files: *
+Copyright: 1998-2021 The Libreswan Project or their individual authors
+License: GPL-2+
+
+Files: debian/*
+Copyright: 2016-2022 Daniel Kahn Gillmor <dkg@fifthhorseman.net>
+License: GPL-2+
+
+Files:
+ lib/libswan/ip_range.c
+ lib/libswan/sameaddr.c
+ lib/libswan/subnettypeof.c
+ lib/libswan/ttoaddress.c
+ lib/libswan/ttodata.c
+ lib/libswan/ttosaid.c
+ lib/libswan/ttosubnet.c
+ lib/libswan/ttoul.c
+Copyright:
+ 1998-2002 Henry Spencer
+ 1998-2002 D. Hugh Redelmeier <hugh@mimosa.com>
+ 2000 Gisle Sælensminde
+ 2003,2006 Michael Richardson
+ 2013 Antony Antony <antony@phenome.org>
+ 2016-2021 Andrew Cagney <cagney@gnu.org>
+License: LGPL-2+
+
+Files: include/libbsdpfkey/libpfkey.h lib/libbsdpfkey/*
+Copyright: 1995, 1996, 1997, 1998, and 1999 WIDE Project.
+License: BSD-3-clause
+ All rights reserved.
+ .
+ Redistribution and use in source and binary forms, with or without
+ modification, are permitted provided that the following conditions
+ are met:
+ 1. Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+ 2. Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in the
+    documentation and/or other materials provided with the distribution.
+ 3. Neither the name of the project nor the names of its contributors
+    may be used to endorse or promote products derived from this software
+    without specific prior written permission.
+ .
+ THIS SOFTWARE IS PROVIDED BY THE PROJECT AND CONTRIBUTORS ``AS IS'' AND
+ ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ ARE DISCLAIMED.  IN NO EVENT SHALL THE PROJECT OR CONTRIBUTORS BE LIABLE
+ FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ SUCH DAMAGE.
+
+License: LGPL-2+
+ This library is free software; you can redistribute it and/or modify it
+ under the terms of the GNU Library General Public License as published by
+ the Free Software Foundation; either version 2 of the License, or (at your
+ option) any later version.  See <http://www.fsf.org/copyleft/lgpl.txt>.
+ .
+ This library is distributed in the hope that it will be useful, but
+ WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Library General Public
+ License for more details.
+ .
+ On Debian systems, a copy of the GNU Library General Public License,
+ version 2, can be found in the file
+ /usr/share/common-licenses/LGPL-2.
+
+License: GPL-2+
+ This program is free software; you can redistribute it and/or modify it
+ under the terms of the GNU General Public License as published by the
+ Free Software Foundation; either version 2 of the License, or (at your
+ option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
+ .
+ This program is distributed in the hope that it will be useful, but
+ WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ for more details.
+ .
+ On Debian systems, a copy of the GNU General Public License, version 2,
+ can be found in the file /usr/share/common-licenses/GPL-2.

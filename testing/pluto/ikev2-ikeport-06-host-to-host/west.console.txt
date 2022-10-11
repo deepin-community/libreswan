@@ -1,0 +1,108 @@
+/testing/guestbin/swan-prep
+west #
+ ipsec start
+Redirecting to: [initsystem]
+west #
+ ../../guestbin/wait-until-pluto-started
+west #
+ ipsec auto --add west-east-ikev2
+002 "west-east-ikev2": adding UDP interface eth1 192.1.2.45:2500
+002 "west-east-ikev2": added IKEv2 connection
+west #
+ ipsec auto --status | grep west-east-ikev2
+000 "west-east-ikev2": 192.1.2.45:2500[@west]...192.1.2.23:4500[@east]; unrouted; eroute owner: #0
+000 "west-east-ikev2":     oriented; my_ip=unset; their_ip=unset; my_updown=ipsec _updown;
+000 "west-east-ikev2":   xauth us:none, xauth them:none,  my_username=[any]; their_username=[any]
+000 "west-east-ikev2":   our auth:rsasig(RSASIG+RSASIG_v1_5), their auth:RSASIG+ECDSA+RSASIG_v1_5, our autheap:none, their autheap:none;
+000 "west-east-ikev2":   modecfg info: us:none, them:none, modecfg policy:push, dns:unset, domains:unset, cat:unset;
+000 "west-east-ikev2":   sec_label:unset;
+000 "west-east-ikev2":   ike_life: 28800s; ipsec_life: 28800s; replay_window: 128; rekey_margin: 540s; rekey_fuzz: 100%; keyingtries: 0;
+000 "west-east-ikev2":   retransmit-interval: 9999ms; retransmit-timeout: 99s; iketcp:no; iketcp-port:4500;
+000 "west-east-ikev2":   initial-contact:no; cisco-unity:no; fake-strongswan:no; send-vendorid:no; send-no-esp-tfc:no;
+000 "west-east-ikev2":   policy: IKEv2+RSASIG+ECDSA+RSASIG_v1_5+ENCRYPT+TUNNEL+PFS+IKE_FRAG_ALLOW+ESN_NO+ESN_YES;
+000 "west-east-ikev2":   v2-auth-hash-policy: SHA2_256+SHA2_384+SHA2_512;
+000 "west-east-ikev2":   conn_prio: 32,32; interface: eth1; metric: 0; mtu: unset; sa_prio:auto; sa_tfc:none;
+000 "west-east-ikev2":   nflog-group: unset; mark: unset; vti-iface:unset; vti-routing:no; vti-shared:no; nic-offload:auto;
+000 "west-east-ikev2":   our idtype: ID_FQDN; our id=@west; their idtype: ID_FQDN; their id=@east
+000 "west-east-ikev2":   liveness: passive; dpdaction:hold; dpddelay:0s; retransmit-timeout:60s
+000 "west-east-ikev2":   nat-traversal: encaps:auto; keepalive:20s
+000 "west-east-ikev2":   newest ISAKMP SA: #0; newest IPsec SA: #0; conn serial: $1;
+west #
+ ipsec whack --impair suppress-retransmits
+west #
+ echo "initdone"
+initdone
+west #
+ ipsec auto --up west-east-ikev2
+1v2 "west-east-ikev2" #1: initiating IKEv2 connection
+1v2 "west-east-ikev2" #1: sent IKE_SA_INIT request
+1v2 "west-east-ikev2" #1: sent IKE_AUTH request {cipher=AES_GCM_16_256 integ=n/a prf=HMAC_SHA2_512 group=MODP2048}
+003 "west-east-ikev2" #1: initiator established IKE SA; authenticated using RSASSA-PSS with SHA2_512 and preloaded certificate '@east'
+004 "west-east-ikev2" #2: initiator established Child SA using #1; IPsec tunnel [192.1.2.45-192.1.2.45:0-65535 0] -> [192.1.2.23-192.1.2.23:0-65535 0] {ESP/ESN=>0xESPESP <0xESPESP xfrm=AES_GCM_16_256-NONE DPD=passive}
+west #
+ ping -n -q -c 4 192.1.2.23
+PING 192.1.2.23 (192.1.2.23) 56(84) bytes of data.
+--- 192.1.2.23 ping statistics ---
+4 packets transmitted, 4 received, 0% packet loss, time XXXX
+rtt min/avg/max/mdev = 0.XXX/0.XXX/0.XXX/0.XXX ms
+west #
+ ipsec whack --trafficstatus
+006 #2: "west-east-ikev2", type=ESP, add_time=1234567890, inBytes=336, outBytes=336, id='@east'
+west #
+ # double check IKE messages still work by sending rekey request
+west #
+ ipsec whack --rekey-ipsec --name west-east-ikev2
+002 "west-east-ikev2" #3: initiating rekey to replace Child SA #2
+1v2 "west-east-ikev2" #3: sent CREATE_CHILD_SA request to rekey IPsec SA
+004 "west-east-ikev2" #3: initiator rekeyed Child SA #2 using #1; IPsec tunnel [192.1.2.45-192.1.2.45:0-65535 0] -> [192.1.2.23-192.1.2.23:0-65535 0] {ESP/ESN=>0xESPESP <0xESPESP xfrm=AES_GCM_16_256-NONE-MODP2048 DPD=passive}
+002 "west-east-ikev2" #2: deleting established Child SA using IKE SA #1
+005 "west-east-ikev2" #2: ESP traffic information: in=336B out=336B
+west #
+ echo done
+done
+west #
+ ../../guestbin/ipsec-look.sh
+west NOW
+XFRM state:
+src 192.1.2.23 dst 192.1.2.45
+	proto esp spi 0xSPISPI reqid REQID mode tunnel
+	replay-window 0 flag af-unspec esn
+	aead rfc4106(gcm(aes)) 0xENCAUTHKEY 128
+	anti-replay esn context:
+	 seq-hi 0x0, seq 0xXX, oseq-hi 0x0, oseq 0xXX
+	 replay_window 128, bitmap-length 4
+	 00000000 00000000 00000000 XXXXXXXX 
+src 192.1.2.45 dst 192.1.2.23
+	proto esp spi 0xSPISPI reqid REQID mode tunnel
+	replay-window 0 flag af-unspec esn
+	aead rfc4106(gcm(aes)) 0xENCAUTHKEY 128
+	anti-replay esn context:
+	 seq-hi 0x0, seq 0xXX, oseq-hi 0x0, oseq 0xXX
+	 replay_window 128, bitmap-length 4
+	 00000000 00000000 00000000 XXXXXXXX 
+XFRM policy:
+src 192.1.2.23/32 dst 192.1.2.45/32
+	dir fwd priority PRIORITY ptype main
+	tmpl src 192.1.2.23 dst 192.1.2.45
+		proto esp reqid REQID mode tunnel
+src 192.1.2.23/32 dst 192.1.2.45/32
+	dir in priority PRIORITY ptype main
+	tmpl src 192.1.2.23 dst 192.1.2.45
+		proto esp reqid REQID mode tunnel
+src 192.1.2.45/32 dst 192.1.2.23/32
+	dir out priority PRIORITY ptype main
+	tmpl src 192.1.2.45 dst 192.1.2.23
+		proto esp reqid REQID mode tunnel
+XFRM done
+IPSEC mangle TABLES
+NEW_IPSEC_CONN mangle TABLES
+ROUTING TABLES
+default via 192.1.2.254 dev eth1
+192.0.1.0/24 dev eth0 proto kernel scope link src 192.0.1.254
+192.0.2.0/24 via 192.1.2.23 dev eth1
+192.1.2.0/24 dev eth1 proto kernel scope link src 192.1.2.45
+NSS_CERTIFICATES
+Certificate Nickname                                         Trust Attributes
+                                                             SSL,S/MIME,JAR/XPI
+west #
+ 

@@ -1,0 +1,76 @@
+From: Daniel Kahn Gillmor <dkg@fifthhorseman.net>
+Date: Fri, 7 Jan 2022 18:36:47 -0500
+Subject: ikev1-policy defaults to drop
+
+IKEv2 has been available for 16 years (RFC 4306 was published December
+2005).  At some point, we should be discouraging IKEv1 adoption.
+
+To the extent that a user needs IKEv1, they can manually add
+ikev1-policy=accept to /etc/ipsec.conf.
+---
+ configs/d.ipsec.conf/ikev1-policy.xml | 7 ++++---
+ include/ipsecconf/keywords.h          | 2 +-
+ lib/libipsecconf/confread.c           | 1 +
+ programs/pluto/server.c               | 5 -----
+ 4 files changed, 6 insertions(+), 9 deletions(-)
+
+diff --git a/configs/d.ipsec.conf/ikev1-policy.xml b/configs/d.ipsec.conf/ikev1-policy.xml
+index 17d1747..3bd6702 100644
+--- a/configs/d.ipsec.conf/ikev1-policy.xml
++++ b/configs/d.ipsec.conf/ikev1-policy.xml
+@@ -3,9 +3,10 @@
+   <listitem>
+ <para>
+ What to do with received IKEv1 packets. Valid options are
+-<emphasis remap='B'>accept</emphasis> (default), <emphasis remap='B'>reject</emphasis> which
+-will reply with an error, and <emphasis remap='B'>drop</emphasis> which will silently drop
+-any received IKEv1 packet. If this option is set to drop or reject, an attempt to load an
++<emphasis remap='B'>drop</emphasis> (default) which will silently drop
++any received IKEv1 packet, <emphasis remap='B'>accept</emphasis>, and
++<emphasis remap='B'>reject</emphasis> which will reply with an error.
++If this option is set to drop or reject, an attempt to load an
+ IKEv1 connection will fail, as these connections would never be able to receive a packet
+ for processing.
+ </para>
+diff --git a/include/ipsecconf/keywords.h b/include/ipsecconf/keywords.h
+index a6c02ba..9b24d11 100644
+--- a/include/ipsecconf/keywords.h
++++ b/include/ipsecconf/keywords.h
+@@ -112,7 +112,7 @@ enum keyword_numeric_config_field {
+ 
+ 	KBF_LISTEN_TCP,		/* listen on TCP port 4500 - default no */
+ 	KBF_LISTEN_UDP,		/* listen on UDP port 500/4500 - default yes */
+-	KBF_GLOBAL_IKEv1,	/* global ikev1 policy - default accept */
++	KBF_GLOBAL_IKEv1,	/* global ikev1 policy - default drop */
+ 	KBF_ROOF
+ };
+ 
+diff --git a/lib/libipsecconf/confread.c b/lib/libipsecconf/confread.c
+index b685b63..29353eb 100644
+--- a/lib/libipsecconf/confread.c
++++ b/lib/libipsecconf/confread.c
+@@ -95,6 +95,7 @@ static void ipsecconf_default_values(struct starter_config *cfg)
+ 	/* Don't inflict BSI requirements on everyone */
+ 	SOPT(KBF_SEEDBITS, 0);
+ 	SOPT(KBF_DROP_OPPO_NULL, false);
++	SOPT(KBF_GLOBAL_IKEv1, GLOBAL_IKEv1_DROP);
+ 
+ #ifdef HAVE_LABELED_IPSEC
+ 	SOPT(KBF_SECCTX, SECCTX);
+diff --git a/programs/pluto/server.c b/programs/pluto/server.c
+index 1685b46..6259b4d 100644
+--- a/programs/pluto/server.c
++++ b/programs/pluto/server.c
+@@ -187,12 +187,7 @@ bool pluto_listen_tcp = false;
+ enum ddos_mode pluto_ddos_mode = DDOS_AUTO; /* default to auto-detect */
+ 
+ enum global_ikev1_policy pluto_ikev1_pol =
+-#ifdef USE_IKEv1
+-	 GLOBAL_IKEv1_ACCEPT;
+-#else
+-	/* there is no IKEv1 code compiled in to send a REJECT */
+ 	GLOBAL_IKEv1_DROP;
+-#endif
+ 
+ #ifdef HAVE_SECCOMP
+ enum seccomp_mode pluto_seccomp_mode = SECCOMP_DISABLED;

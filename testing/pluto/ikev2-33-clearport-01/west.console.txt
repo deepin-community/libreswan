@@ -1,0 +1,79 @@
+/testing/guestbin/swan-prep
+west #
+ ipsec start
+Redirecting to: [initsystem]
+west #
+ ../../guestbin/wait-until-pluto-started
+west #
+ ipsec auto --add west-east
+002 "west-east": added IKEv2 connection
+west #
+ ipsec auto --add pass-7
+002 "pass-7": added passthrough connection
+west #
+ echo "initdone"
+initdone
+west #
+ # on-demand packet triggers IKE to unavailable peer and is blocked
+west #
+ ipsec auto --route west-east
+west #
+ # poke a hole to port 7, those packets will be allowed cleartext
+west #
+ ipsec auto --route pass-7
+west #
+ ip xfrm policy
+src 192.1.2.23/32 dst 192.1.2.45/32 proto tcp sport 7 
+	dir fwd priority PRIORITY ptype main 
+src 192.1.2.23/32 dst 192.1.2.45/32 proto tcp sport 7 
+	dir in priority PRIORITY ptype main 
+src 192.1.2.45/32 dst 192.1.2.23/32 proto tcp dport 7 
+	dir out priority PRIORITY ptype main 
+src 192.1.2.45/32 dst 192.1.2.23/32 
+	dir out priority PRIORITY ptype main 
+	tmpl src 0.0.0.0 dst 0.0.0.0
+		proto esp reqid 0 mode transport
+src 0.0.0.0/0 dst 0.0.0.0/0 
+	socket out priority 0 ptype main 
+src 0.0.0.0/0 dst 0.0.0.0/0 
+	socket in priority 0 ptype main 
+src 0.0.0.0/0 dst 0.0.0.0/0 
+	socket out priority 0 ptype main 
+src 0.0.0.0/0 dst 0.0.0.0/0 
+	socket in priority 0 ptype main 
+src 0.0.0.0/0 dst 0.0.0.0/0 
+	socket out priority 0 ptype main 
+src 0.0.0.0/0 dst 0.0.0.0/0 
+	socket in priority 0 ptype main 
+src 0.0.0.0/0 dst 0.0.0.0/0 
+	socket out priority 0 ptype main 
+src 0.0.0.0/0 dst 0.0.0.0/0 
+	socket in priority 0 ptype main 
+src 0.0.0.0/0 dst 0.0.0.0/0 
+	socket out priority 0 ptype main 
+src 0.0.0.0/0 dst 0.0.0.0/0 
+	socket in priority 0 ptype main 
+src 0.0.0.0/0 dst 0.0.0.0/0 
+	socket out priority 0 ptype main 
+src 0.0.0.0/0 dst 0.0.0.0/0 
+	socket in priority 0 ptype main 
+west #
+ # send packet over the clear exception - should return connection refused
+west #
+ echo 'test' | nc -w 5 192.1.2.23 7
+Ncat: Connection refused.
+west #
+ # send packet over the 'tunnel' that's negotiating - should get blocked
+west #
+ echo 'test' | nc -w 5 192.1.2.23 80
+Ncat: TIMEOUT.
+west #
+ echo done
+done
+west #
+ # west expects XfrmOutNoStates=8
+west #
+ ../../guestbin/xfrmcheck.sh
+ERROR: west: XfrmOutNoStates         	8
+west #
+ 

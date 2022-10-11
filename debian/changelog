@@ -1,0 +1,435 @@
+libreswan (4.7-1) UNRELEASED; urgency=medium
+
+  * update
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Wed, 22 Jun 2022 03:03:41 -0400
+
+libreswan (4.7-1) unstable; urgency=medium
+
+  * New upstream release
+  * move to DEP-14 branch naming
+  * refresh patches
+  * Standards-Version: bump to 4.6.1 (no changes needed)
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Wed, 25 May 2022 13:58:23 -0400
+
+libreswan (4.6-1) unstable; urgency=medium
+
+  * New upstream version
+    - Fixes CVE-2022-23094
+  * Drop patch already upstream
+  * Refresh patches
+  * Clean up lintian-overrides
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Wed, 12 Jan 2022 22:51:04 -0500
+
+libreswan (4.5-2) unstable; urgency=medium
+
+  * Make ikev1-policy default to "drop"
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Fri, 07 Jan 2022 18:45:21 -0500
+
+libreswan (4.5-1) unstable; urgency=medium
+
+  * New upstream release
+  * override lintian about long lines in tests
+  * USE_FIPSCHECK=false is no longer needed
+  * d/copyright: track file movement
+  * add debian/* stanza to d/copyright
+  * standards-version: bump to 4.6.0 (no changes needed)
+  * override spurious lintian warnings
+  * drop bashisms from letsencrypt
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Tue, 28 Dec 2021 11:07:42 +0200
+
+libreswan (4.3-1) unstable; urgency=medium
+
+  * New upstream release
+  * drop patches already upstream
+  * refresh patches
+  * d/copyright: drop unreferenced lib/libswan/initsubnet.c
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Sun, 28 Feb 2021 12:01:15 -0500
+
+libreswan (4.2-1) unstable; urgency=medium
+
+  * New upstream release 4.2
+  * drop spelling patch already merged upstream
+  * fix more spelling
+  * move from USE_XAUTHPAM to USE_AUTHPAM, as recommended by upstream
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Wed, 03 Feb 2021 19:37:09 -0500
+
+libreswan (4.1-4) unstable; urgency=medium
+
+  * supply the same flags during install as during build
+  * embed a copy of AVA on platforms where NSS is missing it
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Thu, 14 Jan 2021 17:21:32 -0500
+
+libreswan (4.1-3) unstable; urgency=medium
+
+  * Use proper toolchain feature tests (and include IPSEC_PROFILE)
+  * make cryptocheck tests more verbose
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Wed, 13 Jan 2021 15:28:30 -0500
+
+libreswan (4.1-2) unstable; urgency=medium
+
+  * change default development branch to debian/main
+  * handle platforms without a stack-protector
+  * Autodetect whether to use pure NSS for KDF
+  * drop unnecessary rejection of KLIPS
+  * make algparse test more verbose
+  * Drop bsdmainutils as a dependency (Closes: #964535)
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Tue, 12 Jan 2021 21:50:15 -0500
+
+libreswan (4.1-1) unstable; urgency=medium
+
+  * New upstream version (Closes: #957473, #966017)
+  * Standards-Version: bumped to 4.5.1 (no changes needed)
+  * Set upstream metadata fields: Bug-Database, Bug-Submit, Repository,
+    Repository-Browse.
+  * refresh patches
+  * clean up debian/copyright, following upstream cleanup
+  * indicate that neither of these patches need to be forwarded upstream
+  * d/rules: track new compilation configuration from upstream
+  * drop unneeded lintian overrides
+  * clean up spelling
+  * avoid shipping accidental backup files
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Tue, 12 Jan 2021 09:24:42 -0500
+
+libreswan (3.32-3) unstable; urgency=medium
+
+  * allow stderr on CAVP tests
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Thu, 28 May 2020 08:13:57 -0400
+
+libreswan (3.32-2) unstable; urgency=medium
+
+  * streamline autopkgtests
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Tue, 26 May 2020 16:55:21 -0400
+
+libreswan (3.32-1) unstable; urgency=medium
+
+  [ Stephen Kitt ]
+  * Remove the systemd dependency (Closes: #931858)
+
+  [ Daniel Kahn Gillmor ]
+  * New upstream version, fixing CVE-2020-1763 (Closes: #960458)
+  * refresh patches, dropping those already applied upstream
+  * Standards-Version: bump to 4.5.0 (no changes needed)
+  * move to dh 13
+  * drop unneeded lintian-override
+  * d/copyright: drop annotations for removed source
+  * move subcommand executables from /usr/lib/ipsec to /usr/libexec/ipsec
+  * fix upstream spelling errors
+  * added buildtime and runtime checks that the crypto works as expected
+  * include upstream patch to address subtle NSS API variance
+  * autopkgtest: add CAVP/ACVP tests
+  * use dh_auto_build instead of $(MAKE) when building
+  * enable cross-building (Closes: #958355)
+  * d/tests/opportunistic: avoid dropping into a pager if run from a
+    terminal
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Fri, 22 May 2020 18:33:46 -0400
+
+libreswan (3.29-2) unstable; urgency=medium
+
+  * Release to unstable
+  * fix up more upstream orthography
+  * standards-version: bump to 4.4.0 (no changes needed
+  * change lintian override of spelling-error-in-copyright to match new
+    reporting
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Mon, 19 Aug 2019 18:57:33 -0400
+
+libreswan (3.29-1) experimental; urgency=medium
+
+  * New upstream release
+   - fixes CVE 2019-10155 and CVE-2019-12312
+    (Closes: #930338, #929916)
+  * refresh patches
+  * d/watch: avoid development releases
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Tue, 11 Jun 2019 07:24:44 +0100
+
+libreswan (3.28-1) experimental; urgency=medium
+
+  * new upstream release (to experimental due to freeze for buster)
+  * refresh patches
+  * fix spelling
+  * fix upstream's broken barf shell script
+  * Standards-Version: bump to 4.3.0 (no changes needed)
+  * move to debhelper 12
+  * d/copyright: lib/libswan/{tto,ip}range.c were merged into ip_range.c
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Tue, 11 Jun 2019 07:23:45 +0100
+
+libreswan (3.27-6) unstable; urgency=medium
+
+  * fix CVE-2019-10155 (closes: #930338)
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Mon, 10 Jun 2019 23:04:05 +0100
+
+libreswan (3.27-5) unstable; urgency=medium
+
+  * fix CVE-2019-12312 (Closes: #929916)
+  * bump Standards-Version to 4.3.0 (no changes needed)
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Mon, 03 Jun 2019 19:36:16 -0400
+
+libreswan (3.27-4) unstable; urgency=medium
+
+  * order object files for reproducible linking
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Tue, 16 Oct 2018 10:27:14 -0400
+
+libreswan (3.27-3) unstable; urgency=medium
+
+  * explicitly set ARCH for reproducibility
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Mon, 15 Oct 2018 16:07:00 -0400
+
+libreswan (3.27-2) unstable; urgency=medium
+
+  * avoid Curve25519 when building against nss that does not support it
+  * backport patch from upstream to clean up ia64 build
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Mon, 15 Oct 2018 13:21:24 -0400
+
+libreswan (3.27-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Fri, 12 Oct 2018 16:55:36 -0400
+
+libreswan (3.26-1) unstable; urgency=medium
+
+  * new upstream release (Closes: #909291)
+  * refresh patches
+  * import two patches from upstream to avoid FTBFS
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Thu, 27 Sep 2018 19:24:35 -0400
+
+libreswan (3.25-2) unstable; urgency=medium
+
+  * remove explicit list of libraries from Depends (Closes: #909203)
+  * bump Standards-Version to 4.2.1 (no changes needed)
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Fri, 21 Sep 2018 02:35:42 -0400
+
+libreswan (3.25-1) unstable; urgency=medium
+
+  * new upstream release
+  * refresh patches
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Wed, 27 Jun 2018 12:46:44 -0400
+
+libreswan (3.23-6) unstable; urgency=medium
+
+  * avoid -fstack-protector-all on ia64
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Tue, 19 Jun 2018 22:39:57 -0400
+
+libreswan (3.23-5) unstable; urgency=medium
+
+  * move to DEP-14 branch naming
+  * Standards-Version: bump to 4.1.4 (no changes needed)
+  * d/rules: drop unneeded PUBDIR definitions
+  * drop spelling-error lintian overrides about Antony Antony (no longer needed)
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Mon, 18 Jun 2018 12:45:39 -0400
+
+libreswan (3.23-4) unstable; urgency=medium
+
+  * d/tests/control: isolation-container → isolation-machine
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Thu, 15 Feb 2018 12:03:58 -0500
+
+libreswan (3.23-3) unstable; urgency=medium
+
+  * d/tests/opportunistic: more details on failure
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Wed, 14 Feb 2018 13:08:09 -0500
+
+libreswan (3.23-2) unstable; urgency=medium
+
+  * d/tests/opportunistic: do not fail on initial systemctl status
+  * d/control: Rules-Requires-Root: no
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Tue, 13 Feb 2018 10:59:46 -0500
+
+libreswan (3.23-1) unstable; urgency=medium
+
+  [ Daniel Kahn Gillmor ]
+  * New upstream release
+  * drop patches already upstream, refresh remaining patches
+
+  [ Antony Antony ]
+  * tests/opportunistic fix, asymetric dnssec test
+
+  [ Daniel Kahn Gillmor ]
+  * d/copyright: Format: use https
+  * d/copyright: remove dropped file
+  * avoid lintian complaint by skipping my skipped test :P
+    (override_dh_auto_test-does-not-check-DEB_BUILD_PROFILES)
+  * quit persecuting Antony Antony, again
+  * fix spelling
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Mon, 05 Feb 2018 16:23:59 -0500
+
+libreswan (3.22-4) unstable; urgency=medium
+
+  * conflict with strongswan-libcharon (Closes: #886842)
+  * Standards-Version: bump to 4.1.3 (no changes needed)
+  * move to debhelper 11
+  * Vcs: move to salsa.debian.org
+  * clean up lintian overrides
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Wed, 10 Jan 2018 12:01:37 -0500
+
+libreswan (3.22-3) unstable; urgency=medium
+
+  * add more dependencies to autopkgtest
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Mon, 13 Nov 2017 02:56:05 +0800
+
+libreswan (3.22-2) unstable; urgency=medium
+
+  * fix debian c-i test so that it can ping
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Sat, 11 Nov 2017 15:46:44 +0800
+
+libreswan (3.22-1) unstable; urgency=medium
+
+  * new upstream release
+  * drop patches already applied upstream
+  * include two new patches as requested by upstream
+  * include ipsec version from upstream release (Closes: #879614)
+  * Standards-Version: bump to 4.1.1 (no changes needed)
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Sat, 11 Nov 2017 14:02:02 +0800
+
+libreswan (3.21-2) unstable; urgency=medium
+
+  [ Antony Antony ]
+  * add systemd build dependency
+  * Revert "USE_DNSSEC=false b/c upstream needs libunbound to link to libevent"
+  * up libunbound2 build dependency to 1.6.5
+
+  [ Daniel Kahn Gillmor ]
+  * bump standards-version to 4.1.0 (no changes needed)
+  * move to python3 instead of python
+  * accept Antony Antony's name for real
+  * avoid lintian griping that we cannot fix
+  * fix spelling
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Tue, 26 Sep 2017 02:39:40 -0400
+
+libreswan (3.21-1) experimental; urgency=medium
+
+  * New upstream release
+  * use systemd presets for default-disabled service
+  * ensure that /run/pluto exists
+  * add dependency on iptables
+  * update build-dependencies to match upstream expectations
+  * Standards-Version: bump to 4.0.1 (no changes needed)
+  * Initial attempt at autopkgtest
+  * USE_DNSSEC=false b/c upstream needs libunbound to link to libevent
+    (and it does not, see #871675)
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Thu, 10 Aug 2017 23:24:56 -0400
+
+libreswan (3.21~rc5-1) experimental; urgency=medium
+
+  [ Daniel Kahn Gillmor ]
+  * new upstream release-candidate
+  * bump Standards-Version to 4.0.0 (no changes needed)
+
+  [ Antony Antony ]
+  * add dns-root-data dependency and use root.key from it
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Mon, 26 Jun 2017 16:56:09 -0400
+
+libreswan (3.21~rc2-1) experimental; urgency=medium
+
+  * new upstream release-candidate
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Fri, 02 Jun 2017 09:58:40 -0400
+
+libreswan (3.20-7) unstable; urgency=medium
+
+  [ Laurent Bigonville ]
+  * Enable SELinux/LABELED_IPSEC support (Closes: #861881)
+  * Only depends against libcap-ng-dev on linux (Closes: #861887)
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Fri, 05 May 2017 12:46:31 -0400
+
+libreswan (3.20-6) unstable; urgency=medium
+
+  * another batch of fixes for time_t on x32
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Tue, 21 Mar 2017 16:15:33 -0400
+
+libreswan (3.20-5) unstable; urgency=medium
+
+  * no stack-protector on alpha either
+  * more fixes for x32 and time_t
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Tue, 21 Mar 2017 12:14:08 -0400
+
+libreswan (3.20-4) unstable; urgency=medium
+
+  * still more x32 time_t printf fixes
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Mon, 20 Mar 2017 22:11:22 -0400
+
+libreswan (3.20-3) unstable; urgency=medium
+
+  * more fixes for printing time_t on x32
+  * fix hppa workaround
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Mon, 20 Mar 2017 21:24:09 -0400
+
+libreswan (3.20-2) unstable; urgency=medium
+
+  * avoid time_t printf problems on x32
+  * avoid -fstack-protector-all for hppa
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Mon, 20 Mar 2017 18:51:29 -0400
+
+libreswan (3.20-1) unstable; urgency=medium
+
+  * New upstream release (Closes: #853507)
+  * drop build-dep on dh-systemd, since it is now in debhelper itself
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Mon, 20 Mar 2017 14:58:40 -0400
+
+libreswan (3.19-2) unstable; urgency=medium
+
+  * more fixes from upstream
+  * Test proposal for mips and mipsel builds (trying to fix: #853947)
+  * conflict directly with strongswan-starter (Closes: #836862)
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Fri, 03 Feb 2017 12:22:16 -0500
+
+libreswan (3.19-1) unstable; urgency=medium
+
+  * drop patches already applied upstream, clean up remaining patches
+  * cleaner build without KLIPS
+  * fix spelling errors found by lintian
+  * convert to debhelper 10
+  * use wrap-and-sort -ast to canonicalize debian metadata files
+  * upload to unstable for wider testing
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Wed, 25 Jan 2017 20:14:04 -0500
+
+libreswan (3.18-1) experimental; urgency=low
+
+  * Initial upload to debian experimental (Closes: #773459)
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Sun, 19 Jun 2016 23:39:14 -0400

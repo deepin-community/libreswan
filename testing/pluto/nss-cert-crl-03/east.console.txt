@@ -1,0 +1,82 @@
+/testing/guestbin/swan-prep --x509
+Preparing X.509 files
+east #
+ crlutil -I -i /testing/x509/crls/needupdate.crl -d sql:/etc/ipsec.d
+east #
+ certutil  -d sql:/etc/ipsec.d -D -n west
+east #
+ ipsec start
+Redirecting to: [initsystem]
+east #
+ ../../guestbin/wait-until-pluto-started
+east #
+ ipsec auto --add nss-cert-crl
+002 "nss-cert-crl": added IKEv1 connection
+east #
+ ipsec auto --status |grep nss-cert-crl
+000 "nss-cert-crl": 192.0.2.254/32===192.1.2.23[C=CA, ST=Ontario, L=Toronto, O=Libreswan, OU=Test Department, CN=east.testing.libreswan.org, E=user-east@testing.libreswan.org]...192.1.2.45[%fromcert]===192.0.1.254/32; unrouted; eroute owner: #0
+000 "nss-cert-crl":     oriented; my_ip=192.0.2.254; their_ip=192.0.1.254; mycert=east; my_updown=ipsec _updown;
+000 "nss-cert-crl":   xauth us:none, xauth them:none,  my_username=[any]; their_username=[any]
+000 "nss-cert-crl":   our auth:rsasig, their auth:rsasig, our autheap:none, their autheap:none;
+000 "nss-cert-crl":   modecfg info: us:none, them:none, modecfg policy:push, dns:unset, domains:unset, cat:unset;
+000 "nss-cert-crl":   sec_label:unset;
+000 "nss-cert-crl":   CAs: 'C=CA, ST=Ontario, L=Toronto, O=Libreswan, OU=Test Department, CN=Libreswan test CA for mainca, E=testing@libreswan.org'...'%any'
+000 "nss-cert-crl":   ike_life: 28800s; ipsec_life: 28800s; replay_window: 128; rekey_margin: 540s; rekey_fuzz: 100%; keyingtries: 0;
+000 "nss-cert-crl":   retransmit-interval: 9999ms; retransmit-timeout: 99s; iketcp:no; iketcp-port:4500;
+000 "nss-cert-crl":   initial-contact:no; cisco-unity:no; fake-strongswan:no; send-vendorid:no; send-no-esp-tfc:no;
+000 "nss-cert-crl":   policy: IKEv1+RSASIG+ENCRYPT+TUNNEL+PFS+IKE_FRAG_ALLOW+ESN_NO+ESN_YES;
+000 "nss-cert-crl":   conn_prio: 32,32; interface: eth1; metric: 0; mtu: unset; sa_prio:auto; sa_tfc:none;
+000 "nss-cert-crl":   nflog-group: unset; mark: unset; vti-iface:unset; vti-routing:no; vti-shared:no; nic-offload:auto;
+000 "nss-cert-crl":   our idtype: ID_DER_ASN1_DN; our id=C=CA, ST=Ontario, L=Toronto, O=Libreswan, OU=Test Department, CN=east.testing.libreswan.org, E=user-east@testing.libreswan.org; their idtype: %fromcert; their id=%fromcert
+000 "nss-cert-crl":   dpd: passive; action:hold; delay:0s; timeout:0s
+000 "nss-cert-crl":   nat-traversal: encaps:auto; keepalive:20s; ikev1-method:rfc+drafts
+000 "nss-cert-crl":   newest ISAKMP SA: #0; newest IPsec SA: #0; conn serial: $1;
+east #
+ echo "initdone"
+initdone
+east #
+ # Check that mainca is present
+east #
+ crlutil -L -d sql:/etc/ipsec.d | grep mainca
+Libreswan test CA for mainca - Libreswan CRL  
+east #
+ # DANGER: race.
+east #
+ #
+east #
+ # Wait for the CRL fetch helper to be triggered and fetch the CRLs.
+east #
+ # The first fetch, which happens happens after 5s, may or may-not be
+east #
+ # too quick for the exchange.
+east #
+ ../../guestbin/wait-for.sh --match 'imported CRL.*CN=nic.testing.libreswan.org' -- cat /tmp/pluto.log
+imported CRL for 'C=CA, ST=Ontario, L=Toronto, O=Libreswan, OU=Test Department, CN=nic.testing.libreswan.org, E=user-nic@testing.libreswan.org' from: http://nic.testing.libreswan.org/revoked.crl
+east #
+ ../../guestbin/wait-for.sh --match 'imported CRL.*CN=hashsha1.testing.libreswan.org' -- cat /tmp/pluto.log
+imported CRL for 'C=CA, ST=Ontario, L=Toronto, O=Libreswan, OU=Test Department, CN=hashsha1.testing.libreswan.org, E=user-hashsha1@testing.libreswan.org' from: http://nic.testing.libreswan.org/revoked.crl
+east #
+ ../../guestbin/wait-for.sh --match 'imported CRL.*CN=north.testing.libreswan.org' -- cat /tmp/pluto.log
+imported CRL for 'C=CA, ST=Ontario, L=Toronto, O=Libreswan, OU=Test Department, CN=north.testing.libreswan.org, E=user-north@testing.libreswan.org' from: http://nic.testing.libreswan.org/revoked.crl
+east #
+ ../../guestbin/wait-for.sh --match 'imported CRL.*CN=road.testing.libreswan.org' -- cat /tmp/pluto.log
+imported CRL for 'C=CA, ST=Ontario, L=Toronto, O=Libreswan, OU=Test Department, CN=road.testing.libreswan.org, E=user-road@testing.libreswan.org' from: http://nic.testing.libreswan.org/revoked.crl
+east #
+ ../../guestbin/wait-for.sh --match 'imported CRL.*CN=east.testing.libreswan.org' -- cat /tmp/pluto.log
+imported CRL for 'C=CA, ST=Ontario, L=Toronto, O=Libreswan, OU=Test Department, CN=east.testing.libreswan.org, E=user-east@testing.libreswan.org' from: http://nic.testing.libreswan.org/revoked.crl
+east #
+ ../../guestbin/wait-for.sh --match 'imported CRL.*CN=Libreswan test CA for mainca' -- cat /tmp/pluto.log
+imported CRL for 'C=CA, ST=Ontario, L=Toronto, O=Libreswan, OU=Test Department, CN=Libreswan test CA for mainca, E=testing@libreswan.org' from: http://nic.testing.libreswan.org/revoked.crl
+east #
+ # check the queue is drained
+east #
+ ipsec auto --listcrls
+000  
+000 List of CRLs:
+000  
+000 issuer: C=CA, ST=Ontario, L=Toronto, O=Libreswan, OU=Test Department, CN=Libreswan test CA for mainca, E=testing@libreswan.org
+000 revoked certs: 2
+000 updates: this TIMESTAMP
+000          next TIMESTAMP
+east #
+ 

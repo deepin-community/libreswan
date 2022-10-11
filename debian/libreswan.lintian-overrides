@@ -1,0 +1,4 @@
+# the pluto(8) manpage is a historic alias for ipsec_pluto, and documents how to invoke the pluto daemon
+libreswan: spare-manual-page usr/share/man/man8/pluto.8.gz
+# the "function cool" is actually awk script embedded in the shell:
+libreswan: bash-term-in-posix-shell 'function cool(' [usr/libexec/ipsec/_secretcensor:30]

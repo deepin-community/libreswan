@@ -1,0 +1,10 @@
+libreswan (4.5-2) unstable; urgency=medium
+
+  We now default ikev1-policy to "drop" instead of "accept".
+
+  Users that need IKEv1 connections should add the following line to the
+  "config setup" stanza in /etc/ipsec.conf:
+
+    ikev1-policy=accept
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Fri, 07 Jan 2022 18:40:31 -0500

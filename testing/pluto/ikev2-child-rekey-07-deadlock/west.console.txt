@@ -1,0 +1,342 @@
+/testing/guestbin/swan-prep
+west #
+ ipsec start
+Redirecting to: [initsystem]
+west #
+ ../../guestbin/wait-until-pluto-started
+west #
+ ipsec whack --impair revival
+west #
+ ipsec whack --impair suppress-retransmits
+west #
+ ipsec auto --add west-east
+002 "west-east/1x0": added IKEv2 connection
+002 "west-east/2x0": added IKEv2 connection
+002 "west-east/3x0": added IKEv2 connection
+002 "west-east/4x0": added IKEv2 connection
+west #
+ sleep 4
+west #
+ echo "initdone"
+initdone
+west #
+ # IKE: #1 CHILD: #2, #3, #4, and #5
+west #
+ ipsec auto --up west-east
+000 initiating all conns with alias='west-east'
+1v2 "west-east/4x0" #1: initiating IKEv2 connection
+000 "west-east/3x0": queue Child SA; waiting on IKE SA "west-east/4x0" #1 negotiating with 192.1.2.23
+000 "west-east/2x0": queue Child SA; waiting on IKE SA "west-east/4x0" #1 negotiating with 192.1.2.23
+000 "west-east/1x0": queue Child SA; waiting on IKE SA "west-east/4x0" #1 negotiating with 192.1.2.23
+1v2 "west-east/4x0" #1: sent IKE_SA_INIT request
+002 "west-east/4x0" #1: switching CHILD #2 to pending connection "west-east/1x0"
+1v2 "west-east/4x0" #1: sent IKE_AUTH request {cipher=AES_GCM_16_256 integ=n/a prf=HMAC_SHA2_512 group=MODP2048}
+003 "west-east/4x0" #1: initiator established IKE SA; authenticated using authby=secret and peer ID_FQDN '@east'
+004 "west-east/1x0" #2: initiator established Child SA using #1; IPsec tunnel [192.0.1.254-192.0.1.254:0-65535 0] -> [192.0.2.254-192.0.2.254:0-65535 0] {ESP/ESN=>0xESPESP <0xESPESP xfrm=AES_GCM_16_256-NONE DPD=passive}
+002 "west-east/2x0" #3: initiating Child SA using IKE SA #1
+002 "west-east/3x0" #4: initiating Child SA using IKE SA #1
+002 "west-east/4x0" #5: initiating Child SA using IKE SA #1
+1v2 "west-east/2x0" #3: sent CREATE_CHILD_SA request for new IPsec SA
+004 "west-east/2x0" #3: initiator established Child SA using #1; IPsec tunnel [192.0.1.253-192.0.1.253:0-65535 0] -> [192.0.2.254-192.0.2.254:0-65535 0] {ESP/ESN=>0xESPESP <0xESPESP xfrm=AES_GCM_16_256-NONE DPD=passive}
+1v2 "west-east/3x0" #4: sent CREATE_CHILD_SA request for new IPsec SA
+004 "west-east/3x0" #4: initiator established Child SA using #1; IPsec tunnel [192.0.1.252-192.0.1.252:0-65535 0] -> [192.0.2.254-192.0.2.254:0-65535 0] {ESP/ESN=>0xESPESP <0xESPESP xfrm=AES_GCM_16_256-NONE DPD=passive}
+1v2 "west-east/4x0" #5: sent CREATE_CHILD_SA request for new IPsec SA
+004 "west-east/4x0" #5: initiator established Child SA using #1; IPsec tunnel [192.0.1.251-192.0.1.251:0-65535 0] -> [192.0.2.254-192.0.2.254:0-65535 0] {ESP/ESN=>0xESPESP <0xESPESP xfrm=AES_GCM_16_256-NONE DPD=passive}
+west #
+ # CHILD #2->#6
+west #
+ ipsec whack --rekey-ipsec --name west-east/1x0 --async
+west #
+ # CHILD #3->#7
+west #
+ ipsec whack --rekey-ipsec --name west-east/2x0 --async
+west #
+ # CHILD #4->#8
+west #
+ ipsec whack --rekey-ipsec --name west-east/3x0 --async
+west #
+ # CHILD #5->#9
+west #
+ ipsec whack --rekey-ipsec --name west-east/4x0 --async
+west #
+ sleep 45
+west #
+ # state #1 in STATE_V2_ESTABLISHED_IKE_SA, and #6, #7, #8 and #9 in STATE_V2_ESTABLISHED_CHILD_SA
+west #
+ # anything other state is a sign of regression
+west #
+ ipsec showstates
+000 #6: "west-east/1x0":500 STATE_V2_ESTABLISHED_CHILD_SA (established Child SA); REKEY in XXs; REPLACE in XXs; newest; eroute owner; IKE SA #1; idle;
+000 #6: "west-east/1x0" esp.ESPSPIi@192.1.2.23 esp.ESPSPIi@192.1.2.45 tun.0@192.1.2.23 tun.0@192.1.2.45 Traffic: ESPin=0B ESPout=0B ESPmax=0B 
+000 #7: "west-east/2x0":500 STATE_V2_ESTABLISHED_CHILD_SA (established Child SA); REKEY in XXs; REPLACE in XXs; newest; eroute owner; IKE SA #1; idle;
+000 #7: "west-east/2x0" esp.ESPSPIi@192.1.2.23 esp.ESPSPIi@192.1.2.45 tun.0@192.1.2.23 tun.0@192.1.2.45 Traffic: ESPin=0B ESPout=0B ESPmax=0B 
+000 #8: "west-east/3x0":500 STATE_V2_ESTABLISHED_CHILD_SA (established Child SA); REKEY in XXs; REPLACE in XXs; newest; eroute owner; IKE SA #1; idle;
+000 #8: "west-east/3x0" esp.ESPSPIi@192.1.2.23 esp.ESPSPIi@192.1.2.45 tun.0@192.1.2.23 tun.0@192.1.2.45 Traffic: ESPin=0B ESPout=0B ESPmax=0B 
+000 #1: "west-east/4x0":500 STATE_V2_ESTABLISHED_IKE_SA (established IKE SA); REKEY in XXs; REPLACE in XXs; newest; idle;
+000 #9: "west-east/4x0":500 STATE_V2_ESTABLISHED_CHILD_SA (established Child SA); REKEY in XXs; REPLACE in XXs; newest; eroute owner; IKE SA #1; idle;
+000 #9: "west-east/4x0" esp.ESPSPIi@192.1.2.23 esp.ESPSPIi@192.1.2.45 tun.0@192.1.2.23 tun.0@192.1.2.45 Traffic: ESPin=0B ESPout=0B ESPmax=0B 
+west #
+ # this is complex grep line susceptible to changes to log lines.
+west #
+ # until we find better one keep this.
+west #
+ # May be once the bug is fixed comment it out?
+west #
+ grep -E  "Message ID:|emit IKEv2 Delete Payload|exchange type:|**emit ISAKMP Message|**parse ISAKMP Message" /tmp/pluto.log | sed -e 's/ (.*/ (..)/'
+| Message ID: IKE #1 initializing (..)
+| **emit ISAKMP Message:
+|    exchange type: ISAKMP_v2_IKE_SA_INIT (..)
+|    Message ID: 0 (..)
+| Message ID: updating counters for #1
+| Message ID: IKE #1 skipping update_recv as no message (..)
+| Message ID: IKE #1 scheduling EVENT_RETRANSMIT (..)
+| Message ID: IKE #1 updating initiator sent message request 0 (..)
+| Message ID: IKE #1 no pending message initiators to schedule (..)
+| **parse ISAKMP Message:
+|    exchange type: ISAKMP_v2_IKE_SA_INIT (..)
+|    Message ID: 0 (..)
+| Message ID: IKE #1 initiator processing response to existing exchange (..)
+| **emit ISAKMP Message:
+|    exchange type: ISAKMP_v2_IKE_AUTH (..)
+|    Message ID: 1 (..)
+| Message ID: updating counters for #1
+| Message ID: IKE #1 no EVENT_RETRANSMIT to clear; suspect submit_task() (..)
+| Message ID: IKE #1 updating initiator received message response 0 (..)
+| Message ID: IKE #1 scheduling EVENT_RETRANSMIT (..)
+| Message ID: IKE #1 updating initiator sent message request 1 (..)
+| Message ID: IKE #1 no pending message initiators to schedule (..)
+| **parse ISAKMP Message:
+|    exchange type: ISAKMP_v2_IKE_AUTH (..)
+|    Message ID: 1 (..)
+| Message ID: IKE #1 initiator processing response to existing exchange (..)
+| Message ID: updating counters for #1
+| Message ID: IKE #1 clearing EVENT_RETRANSMIT as response received (..)
+| Message ID: IKE #1 updating initiator received message response 1 (..)
+| Message ID: IKE #1 skipping update_send as nothing to send (..)
+| Message ID: IKE #1 no pending message initiators to schedule (..)
+| Message ID: IKE #1 wakeing IKE SA for next initiator #3, (..)
+| Message ID: IKE #1 wakeing IKE SA for next initiator #3, (..)
+| Message ID: IKE #1 wakeing IKE SA for next initiator #3, (..)
+| Message ID: IKE #1 resuming IKE SA for #3 (..)
+| **emit ISAKMP Message:
+|    exchange type: ISAKMP_v2_CREATE_CHILD_SA (..)
+|    Message ID: 2 (..)
+| Message ID: updating counters for #1
+| Message ID: IKE #1 skipping update_recv as no message (..)
+| Message ID: IKE #1 scheduling EVENT_RETRANSMIT (..)
+| Message ID: IKE #1 updating initiator sent message request 2 (..)
+| Message ID: IKE #1 next initiator #4 blocked by outstanding response (..)
+| **parse ISAKMP Message:
+|    exchange type: ISAKMP_v2_CREATE_CHILD_SA (..)
+|    Message ID: 2 (..)
+| Message ID: IKE #1 initiator processing response to existing exchange (..)
+| Message ID: updating counters for #1
+| Message ID: IKE #1 clearing EVENT_RETRANSMIT as response received (..)
+| Message ID: IKE #1 updating initiator received message response 2 (..)
+| Message ID: IKE #1 skipping update_send as nothing to send (..)
+| Message ID: IKE #1 wakeing IKE SA for next initiator #4, (..)
+| Message ID: IKE #1 resuming IKE SA for #4 (..)
+| **emit ISAKMP Message:
+|    exchange type: ISAKMP_v2_CREATE_CHILD_SA (..)
+|    Message ID: 3 (..)
+| Message ID: updating counters for #1
+| Message ID: IKE #1 skipping update_recv as no message (..)
+| Message ID: IKE #1 scheduling EVENT_RETRANSMIT (..)
+| Message ID: IKE #1 updating initiator sent message request 3 (..)
+| Message ID: IKE #1 next initiator #5 blocked by outstanding response (..)
+| **parse ISAKMP Message:
+|    exchange type: ISAKMP_v2_CREATE_CHILD_SA (..)
+|    Message ID: 3 (..)
+| Message ID: IKE #1 initiator processing response to existing exchange (..)
+| Message ID: updating counters for #1
+| Message ID: IKE #1 clearing EVENT_RETRANSMIT as response received (..)
+| Message ID: IKE #1 updating initiator received message response 3 (..)
+| Message ID: IKE #1 skipping update_send as nothing to send (..)
+| Message ID: IKE #1 wakeing IKE SA for next initiator #5, (..)
+| Message ID: IKE #1 resuming IKE SA for #5 (..)
+| **emit ISAKMP Message:
+|    exchange type: ISAKMP_v2_CREATE_CHILD_SA (..)
+|    Message ID: 4 (..)
+| Message ID: updating counters for #1
+| Message ID: IKE #1 skipping update_recv as no message (..)
+| Message ID: IKE #1 scheduling EVENT_RETRANSMIT (..)
+| Message ID: IKE #1 updating initiator sent message request 4 (..)
+| Message ID: IKE #1 no pending message initiators to schedule (..)
+| **parse ISAKMP Message:
+|    exchange type: ISAKMP_v2_CREATE_CHILD_SA (..)
+|    Message ID: 4 (..)
+| Message ID: IKE #1 initiator processing response to existing exchange (..)
+| Message ID: updating counters for #1
+| Message ID: IKE #1 clearing EVENT_RETRANSMIT as response received (..)
+| Message ID: IKE #1 updating initiator received message response 4 (..)
+| Message ID: IKE #1 skipping update_send as nothing to send (..)
+| Message ID: IKE #1 no pending message initiators to schedule (..)
+| Message ID: IKE #1 wakeing IKE SA for next initiator #6, (..)
+| Message ID: IKE #1 resuming IKE SA for #6 (..)
+| **emit ISAKMP Message:
+|    exchange type: ISAKMP_v2_CREATE_CHILD_SA (..)
+|    Message ID: 5 (..)
+| Message ID: updating counters for #1
+| Message ID: IKE #1 skipping update_recv as no message (..)
+| Message ID: IKE #1 scheduling EVENT_RETRANSMIT (..)
+| Message ID: IKE #1 updating initiator sent message request 5 (..)
+| Message ID: IKE #1 no pending message initiators to schedule (..)
+| Message ID: IKE #1 next initiator #7 blocked by outstanding response (..)
+| Message ID: IKE #1 next initiator #7 blocked by outstanding response (..)
+| Message ID: IKE #1 next initiator #7 blocked by outstanding response (..)
+| **parse ISAKMP Message:
+|    exchange type: ISAKMP_v2_CREATE_CHILD_SA (..)
+|    Message ID: 5 (..)
+| Message ID: IKE #1 initiator processing response to existing exchange (..)
+| Message ID: updating counters for #1
+| Message ID: IKE #1 clearing EVENT_RETRANSMIT as response received (..)
+| Message ID: IKE #1 updating initiator received message response 5 (..)
+| Message ID: IKE #1 skipping update_send as nothing to send (..)
+| Message ID: IKE #1 wakeing IKE SA for next initiator #7, (..)
+| Message ID: IKE #1 resuming IKE SA for #7 (..)
+| **emit ISAKMP Message:
+|    exchange type: ISAKMP_v2_CREATE_CHILD_SA (..)
+|    Message ID: 6 (..)
+| Message ID: updating counters for #1
+| Message ID: IKE #1 skipping update_recv as no message (..)
+| Message ID: IKE #1 scheduling EVENT_RETRANSMIT (..)
+| Message ID: IKE #1 updating initiator sent message request 6 (..)
+| Message ID: IKE #1 next initiator #8 blocked by outstanding response (..)
+| Message ID: IKE #1 next initiator #2 blocked by outstanding response (..)
+| **parse ISAKMP Message:
+|    exchange type: ISAKMP_v2_CREATE_CHILD_SA (..)
+|    Message ID: 6 (..)
+| Message ID: IKE #1 initiator processing response to existing exchange (..)
+| Message ID: updating counters for #1
+| Message ID: IKE #1 clearing EVENT_RETRANSMIT as response received (..)
+| Message ID: IKE #1 updating initiator received message response 6 (..)
+| Message ID: IKE #1 skipping update_send as nothing to send (..)
+| Message ID: IKE #1 wakeing IKE SA for next initiator #2, (..)
+| Message ID: IKE #1 resuming IKE SA for #2 (..)
+| **emit ISAKMP Message:
+|    exchange type: ISAKMP_v2_INFORMATIONAL (..)
+|    Message ID: 7 (..)
+| ****emit IKEv2 Delete Payload:
+| Message ID: updating counters for #1
+| Message ID: IKE #1 skipping update_recv as no message (..)
+| Message ID: IKE #1 scheduling EVENT_RETRANSMIT (..)
+| Message ID: IKE #1 updating initiator sent message request 7 (..)
+| Message ID: IKE #1 next initiator #8 blocked by outstanding response (..)
+| **parse ISAKMP Message:
+|    exchange type: ISAKMP_v2_INFORMATIONAL (..)
+|    Message ID: 7 (..)
+| Message ID: IKE #1 initiator processing response to existing exchange (..)
+| Message ID: updating counters for #1
+| Message ID: IKE #1 clearing EVENT_RETRANSMIT as response received (..)
+| Message ID: IKE #1 updating initiator received message response 7 (..)
+| Message ID: IKE #1 skipping update_send as nothing to send (..)
+| Message ID: IKE #1 wakeing IKE SA for next initiator #8, (..)
+| Message ID: IKE #1 resuming IKE SA for #8 (..)
+| **emit ISAKMP Message:
+|    exchange type: ISAKMP_v2_CREATE_CHILD_SA (..)
+|    Message ID: 8 (..)
+| Message ID: updating counters for #1
+| Message ID: IKE #1 skipping update_recv as no message (..)
+| Message ID: IKE #1 scheduling EVENT_RETRANSMIT (..)
+| Message ID: IKE #1 updating initiator sent message request 8 (..)
+| Message ID: IKE #1 next initiator #9 blocked by outstanding response (..)
+| Message ID: IKE #1 next initiator #3 blocked by outstanding response (..)
+| **parse ISAKMP Message:
+|    exchange type: ISAKMP_v2_CREATE_CHILD_SA (..)
+|    Message ID: 8 (..)
+| Message ID: IKE #1 initiator processing response to existing exchange (..)
+| Message ID: updating counters for #1
+| Message ID: IKE #1 clearing EVENT_RETRANSMIT as response received (..)
+| Message ID: IKE #1 updating initiator received message response 8 (..)
+| Message ID: IKE #1 skipping update_send as nothing to send (..)
+| Message ID: IKE #1 wakeing IKE SA for next initiator #3, (..)
+| Message ID: IKE #1 resuming IKE SA for #3 (..)
+| **emit ISAKMP Message:
+|    exchange type: ISAKMP_v2_INFORMATIONAL (..)
+|    Message ID: 9 (..)
+| ****emit IKEv2 Delete Payload:
+| Message ID: updating counters for #1
+| Message ID: IKE #1 skipping update_recv as no message (..)
+| Message ID: IKE #1 scheduling EVENT_RETRANSMIT (..)
+| Message ID: IKE #1 updating initiator sent message request 9 (..)
+| Message ID: IKE #1 next initiator #9 blocked by outstanding response (..)
+| **parse ISAKMP Message:
+|    exchange type: ISAKMP_v2_INFORMATIONAL (..)
+|    Message ID: 9 (..)
+| Message ID: IKE #1 initiator processing response to existing exchange (..)
+| Message ID: updating counters for #1
+| Message ID: IKE #1 clearing EVENT_RETRANSMIT as response received (..)
+| Message ID: IKE #1 updating initiator received message response 9 (..)
+| Message ID: IKE #1 skipping update_send as nothing to send (..)
+| Message ID: IKE #1 wakeing IKE SA for next initiator #9, (..)
+| Message ID: IKE #1 resuming IKE SA for #9 (..)
+| **emit ISAKMP Message:
+|    exchange type: ISAKMP_v2_CREATE_CHILD_SA (..)
+|    Message ID: 10 (..)
+| Message ID: updating counters for #1
+| Message ID: IKE #1 skipping update_recv as no message (..)
+| Message ID: IKE #1 scheduling EVENT_RETRANSMIT (..)
+| Message ID: IKE #1 updating initiator sent message request 10 (..)
+| Message ID: IKE #1 no pending message initiators to schedule (..)
+| Message ID: IKE #1 next initiator #4 blocked by outstanding response (..)
+| **parse ISAKMP Message:
+|    exchange type: ISAKMP_v2_CREATE_CHILD_SA (..)
+|    Message ID: 10 (..)
+| Message ID: IKE #1 initiator processing response to existing exchange (..)
+| Message ID: updating counters for #1
+| Message ID: IKE #1 clearing EVENT_RETRANSMIT as response received (..)
+| Message ID: IKE #1 updating initiator received message response 10 (..)
+| Message ID: IKE #1 skipping update_send as nothing to send (..)
+| Message ID: IKE #1 wakeing IKE SA for next initiator #4, (..)
+| Message ID: IKE #1 resuming IKE SA for #4 (..)
+| **emit ISAKMP Message:
+|    exchange type: ISAKMP_v2_INFORMATIONAL (..)
+|    Message ID: 11 (..)
+| ****emit IKEv2 Delete Payload:
+| Message ID: updating counters for #1
+| Message ID: IKE #1 skipping update_recv as no message (..)
+| Message ID: IKE #1 scheduling EVENT_RETRANSMIT (..)
+| Message ID: IKE #1 updating initiator sent message request 11 (..)
+| Message ID: IKE #1 no pending message initiators to schedule (..)
+| **parse ISAKMP Message:
+|    exchange type: ISAKMP_v2_INFORMATIONAL (..)
+|    Message ID: 11 (..)
+| Message ID: IKE #1 initiator processing response to existing exchange (..)
+| Message ID: updating counters for #1
+| Message ID: IKE #1 clearing EVENT_RETRANSMIT as response received (..)
+| Message ID: IKE #1 updating initiator received message response 11 (..)
+| Message ID: IKE #1 skipping update_send as nothing to send (..)
+| Message ID: IKE #1 no pending message initiators to schedule (..)
+| Message ID: IKE #1 wakeing IKE SA for next initiator #5, (..)
+| Message ID: IKE #1 resuming IKE SA for #5 (..)
+| **emit ISAKMP Message:
+|    exchange type: ISAKMP_v2_INFORMATIONAL (..)
+|    Message ID: 12 (..)
+| ****emit IKEv2 Delete Payload:
+| Message ID: updating counters for #1
+| Message ID: IKE #1 skipping update_recv as no message (..)
+| Message ID: IKE #1 scheduling EVENT_RETRANSMIT (..)
+| Message ID: IKE #1 updating initiator sent message request 12 (..)
+| Message ID: IKE #1 no pending message initiators to schedule (..)
+| **parse ISAKMP Message:
+|    exchange type: ISAKMP_v2_INFORMATIONAL (..)
+|    Message ID: 12 (..)
+| Message ID: IKE #1 initiator processing response to existing exchange (..)
+| Message ID: updating counters for #1
+| Message ID: IKE #1 clearing EVENT_RETRANSMIT as response received (..)
+| Message ID: IKE #1 updating initiator received message response 12 (..)
+| Message ID: IKE #1 skipping update_send as nothing to send (..)
+| Message ID: IKE #1 no pending message initiators to schedule (..)
+west #
+ echo done
+done
+west #
+ ipsec whack --trafficstatus
+006 #6: "west-east/1x0", type=ESP, add_time=1234567890, inBytes=0, outBytes=0, id='@east'
+006 #7: "west-east/2x0", type=ESP, add_time=1234567890, inBytes=0, outBytes=0, id='@east'
+006 #8: "west-east/3x0", type=ESP, add_time=1234567890, inBytes=0, outBytes=0, id='@east'
+006 #9: "west-east/4x0", type=ESP, add_time=1234567890, inBytes=0, outBytes=0, id='@east'
+west #
+ # policies and state should be multiple
+west #
+ 

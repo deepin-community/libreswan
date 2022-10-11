@@ -1,0 +1,71 @@
+/* sparse_names, for libreswan
+ *
+ * Copyright (C) 1997 Angelos D. Keromytis.
+ * Copyright (C) 1998-2002,2013 D. Hugh Redelmeier <hugh@mimosa.com>
+ * Copyright (C) 2004-2008  Michael Richardson <mcr@xelerance.com>
+ * Copyright (C) 2004-2009  Paul Wouters <paul@xelerance.com>
+ * Copyright (C) 2008 Antony Antony <antony@xelerance.com>
+ * Copyright (C) 2009 Avesh Agarwal <avagarwa@redhat.com>
+ * Copyright (C) 2012 Paul Wouters <paul@libreswan.org>
+ * Copyright (C) 2013 Tuomo Soini <tis@foobar.fi>
+ * Copyright (C) 2019 Andrew Cagney <cagney@gnu.org>
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
+ * option) any later version.  See <https://www.gnu.org/licenses/gpl2.txt>.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ * for more details.
+ */
+
+#ifndef SPARSE_NAMES_H
+#define SPARSE_NAMES_H
+
+struct jambuf;
+
+/*
+ * sparse_names is much like enum_names, except values are not known
+ * to be contiguous or ordered.
+ *
+ * The array is NULL terminated, as in .name==NULL; but suggest using
+ * SPARSE_NULL in case that needs to change.
+ */
+
+#define SPARSE_NULL { NULL, 0, }
+
+struct sparse_name {
+	/* field order (backwards?) dictated by started() */
+	const char *const name;
+	unsigned long value;
+};
+
+typedef const struct sparse_name sparse_names[];
+
+typedef struct {
+	char buf[16];/*how big?*/
+} sparse_buf;
+
+const char *sparse_name(sparse_names sd, unsigned long val);
+size_t jam_sparse(struct jambuf *buf, sparse_names sd, unsigned long val);
+const char *str_sparse(sparse_names sd, unsigned long val, sparse_buf *buf);
+
+/*
+ * sparse_sparse_names is much like enum_enum_names, except, again the
+ * values are neither assumed to be contingious or ordered.
+ *
+ * The array is terminated by a NULL entry.
+ */
+
+struct sparse_sparse_name {
+	unsigned long value;
+	const struct sparse_name *names;
+};
+
+typedef const struct sparse_sparse_name sparse_sparse_names[];
+
+extern const char *sparse_sparse_name(sparse_sparse_names sd, unsigned long v1, unsigned long v2);
+
+#endif /* _CONSTANTS_H_ */

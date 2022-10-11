@@ -1,0 +1,24 @@
+From: Daniel Kahn Gillmor <dkg@fifthhorseman.net>
+Date: Sat, 21 Mar 2015 15:19:20 -0400
+Subject: do not use git version
+
+Forwarded: not-needed
+
+avoid using git version when building debian package
+---
+ packaging/utils/setlibreswanversion | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/packaging/utils/setlibreswanversion b/packaging/utils/setlibreswanversion
+index 78aa3b1..48c0e91 100755
+--- a/packaging/utils/setlibreswanversion
++++ b/packaging/utils/setlibreswanversion
+@@ -23,7 +23,7 @@ baseversion="${1}"
+ cd "${2:-.}" || usage
+ 
+ # -f .git check is needed for "git worktree"
+-if [ -d .git -o -f .git ]; then
++if false; then
+     if git version >/dev/null 2>&1; then
+ 	CUR=$(git describe --tags ${ADD_GIT_DIRTY})
+ 	BRANCH=$(git rev-parse --abbrev-ref HEAD)

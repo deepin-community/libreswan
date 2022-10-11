@@ -1,0 +1,92 @@
+/testing/guestbin/swan-prep
+west #
+ # confirm that the network is alive
+west #
+ ipsec start
+Redirecting to: [initsystem]
+west #
+ ../../guestbin/wait-until-pluto-started
+west #
+ ipsec auto --add west-east-delete1
+002 "west-east-delete1": added IKEv2 connection
+west #
+ ipsec auto --status | grep west-east
+000 "west-east-delete1": 192.0.1.0/24===192.1.2.45[@west]...192.1.2.23[@east]===192.0.2.0/24; unrouted; eroute owner: #0
+000 "west-east-delete1":     oriented; my_ip=unset; their_ip=unset; my_updown=ipsec _updown;
+000 "west-east-delete1":   xauth us:none, xauth them:none,  my_username=[any]; their_username=[any]
+000 "west-east-delete1":   our auth:secret, their auth:secret, our autheap:none, their autheap:none;
+000 "west-east-delete1":   modecfg info: us:none, them:none, modecfg policy:push, dns:unset, domains:unset, cat:unset;
+000 "west-east-delete1":   sec_label:unset;
+000 "west-east-delete1":   ike_life: 28800s; ipsec_life: 28800s; replay_window: 128; rekey_margin: 540s; rekey_fuzz: 100%; keyingtries: 0;
+000 "west-east-delete1":   retransmit-interval: 9999ms; retransmit-timeout: 99s; iketcp:no; iketcp-port:4500;
+000 "west-east-delete1":   initial-contact:no; cisco-unity:no; fake-strongswan:no; send-vendorid:no; send-no-esp-tfc:no;
+000 "west-east-delete1":   policy: IKEv2+PSK+ENCRYPT+TUNNEL+PFS+IKE_FRAG_ALLOW+ESN_NO+ESN_YES;
+000 "west-east-delete1":   v2-auth-hash-policy: none;
+000 "west-east-delete1":   conn_prio: 24,24; interface: eth1; metric: 0; mtu: unset; sa_prio:auto; sa_tfc:none;
+000 "west-east-delete1":   nflog-group: unset; mark: unset; vti-iface:unset; vti-routing:no; vti-shared:no; nic-offload:auto;
+000 "west-east-delete1":   our idtype: ID_FQDN; our id=@west; their idtype: ID_FQDN; their id=@east
+000 "west-east-delete1":   liveness: passive; dpdaction:hold; dpddelay:0s; retransmit-timeout:60s
+000 "west-east-delete1":   nat-traversal: encaps:auto; keepalive:20s
+000 "west-east-delete1":   newest ISAKMP SA: #0; newest IPsec SA: #0; conn serial: $1;
+west #
+ echo "initdone"
+initdone
+west #
+ ipsec auto --up west-east-delete1
+1v2 "west-east-delete1" #1: initiating IKEv2 connection
+1v2 "west-east-delete1" #1: sent IKE_SA_INIT request
+1v2 "west-east-delete1" #1: sent IKE_AUTH request {cipher=AES_GCM_16_256 integ=n/a prf=HMAC_SHA2_512 group=MODP2048}
+003 "west-east-delete1" #1: initiator established IKE SA; authenticated using authby=secret and peer ID_FQDN '@east'
+004 "west-east-delete1" #2: initiator established Child SA using #1; IPsec tunnel [192.0.1.0-192.0.1.255:0-65535 0] -> [192.0.2.0-192.0.2.255:0-65535 0] {ESP/ESN=>0xESPESP <0xESPESP xfrm=AES_GCM_16_256-NONE DPD=passive}
+west #
+ ../../guestbin/ping-once.sh --up -I 192.0.1.254 192.0.2.254
+up
+west #
+ ipsec showstates
+000 #1: "west-east-delete1":500 STATE_V2_ESTABLISHED_IKE_SA (established IKE SA); REKEY in XXs; REPLACE in XXs; newest; idle;
+000 #2: "west-east-delete1":500 STATE_V2_ESTABLISHED_CHILD_SA (established Child SA); REKEY in XXs; REPLACE in XXs; newest; eroute owner; IKE SA #1; idle;
+000 #2: "west-east-delete1" esp.ESPSPIi@192.1.2.23 esp.ESPSPIi@192.1.2.45 tun.0@192.1.2.23 tun.0@192.1.2.45 Traffic: ESPin=84B ESPout=84B ESPmax=0B 
+west #
+ echo "sleeping a bit.. 2"
+sleeping a bit.. 2
+west #
+ sleep 2
+west #
+ ipsec whack --deletestate 2
+002 "west-east-delete1" #2: deleting established Child SA using IKE SA #1
+005 "west-east-delete1" #2: ESP traffic information: in=84B out=84B
+west #
+ echo "sleeping a bit.. 2"
+sleeping a bit.. 2
+west #
+ sleep 2
+west #
+ ipsec showstates
+000 #1: "west-east-delete1":500 STATE_V2_ESTABLISHED_IKE_SA (established IKE SA); REKEY in XXs; REPLACE in XXs; newest; idle;
+west #
+ ipsec whack --trafficstatus
+west #
+ echo done
+done
+west #
+ ../../guestbin/ipsec-look.sh
+west NOW
+XFRM state:
+XFRM policy:
+src 192.0.1.0/24 dst 192.0.2.0/24
+	dir out priority PRIORITY ptype main
+	tmpl src 0.0.0.0 dst 0.0.0.0
+		proto esp reqid 0 mode transport
+XFRM done
+IPSEC mangle TABLES
+NEW_IPSEC_CONN mangle TABLES
+ROUTING TABLES
+default via 192.1.2.254 dev eth1
+192.0.1.0/24 dev eth0 proto kernel scope link src 192.0.1.254
+192.0.2.0/24 via 192.1.2.23 dev eth1
+192.1.2.0/24 dev eth1 proto kernel scope link src 192.1.2.45
+NSS_CERTIFICATES
+Certificate Nickname                                         Trust Attributes
+                                                             SSL,S/MIME,JAR/XPI
+west #
+ 

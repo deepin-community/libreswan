@@ -1,0 +1,33 @@
+/testing/guestbin/swan-prep --x509 --x509name key2032
+Preparing X.509 files
+west #
+ ipsec start
+Redirecting to: [initsystem]
+west #
+ ../../guestbin/wait-until-pluto-started
+west #
+ ipsec auto --add westnet-eastnet-ikev2
+002 "westnet-eastnet-ikev2": added IKEv2 connection
+west #
+ echo "initdone"
+initdone
+west #
+ ipsec whack --impair suppress-retransmits
+west #
+ # should fail - our FIPS code requires 3072 minimum key
+west #
+ ipsec auto --up westnet-eastnet-ikev2
+1v2 "westnet-eastnet-ikev2" #1: initiating IKEv2 connection
+1v2 "westnet-eastnet-ikev2" #1: sent IKE_SA_INIT request
+1v2 "westnet-eastnet-ikev2" #1: sent IKE_AUTH request {cipher=AES_GCM_16_256 integ=n/a prf=HMAC_SHA2_512 group=MODP2048}
+003 "westnet-eastnet-ikev2" #1: IKE SA authentication request rejected by peer: AUTHENTICATION_FAILED
+036 "westnet-eastnet-ikev2" #1: encountered fatal error in state STATE_V2_PARENT_I2
+002 "westnet-eastnet-ikev2" #1: deleting state (STATE_V2_PARENT_I2) and NOT sending notification
+002 "westnet-eastnet-ikev2" #1: deleting IKE SA but connection is supposed to remain up; schedule EVENT_REVIVE_CONNS
+west #
+ echo done
+done
+west #
+ grep "FIPS: rejecting" /tmp/pluto.log
+west #
+ 

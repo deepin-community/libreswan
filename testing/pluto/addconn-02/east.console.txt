@@ -1,0 +1,60 @@
+/testing/guestbin/swan-prep
+east #
+ ifconfig eth0 0.0.0.0 down
+east #
+ ifconfig eth1 178.62.253.21 netmask 255.255.192.0
+east #
+ ifconfig eth1:1 10.8.0.1 netmask 255.255.255.0
+east #
+ ifconfig eth1:2 10.9.0.1 netmask 255.255.255.0
+east #
+ route add default gw 178.62.192.1
+east #
+ # add many routes
+east #
+ sh ./ips.sh
+east #
+ ipsec start
+Redirecting to: [initsystem]
+east #
+ ../../guestbin/wait-until-pluto-started
+east #
+ ipsec addconn --verbose test
+opening file: /etc/ipsec.conf
+debugging mode enabled
+end of file /etc/ipsec.conf
+Loading conn test
+starter: left is KH_DEFAULTROUTE
+loading named conns: test
+resolving family = IPv4 src = <defaultroute> gateway = <defaultroute> peer <any>
+  seeking gateway
+  query getroute +REQUEST +ROOT +MATCH
+  src <unset-address> prefsrc <unset-address> gateway 178.62.192.1 dst <unset-address> dev eth1 priority -1 pref -1 table 254
+  found gateway (host_nexthop): 178.62.192.1
+  please-call-again: src = <defaultroute> gateway = 178.62.192.1
+resolving family = IPv4 src = <defaultroute> gateway = 178.62.192.1 peer <any>
+  seeking prefsrc
+  query getroute +REQUEST
+  add dst 178.62.192.1 (host->nexthop)
+  src <unset-address> prefsrc 178.62.253.21 gateway <unset-address> dst 178.62.192.1 dev eth1 priority -1 pref -1 table 254 +cacheinfo +uid
+  found prefsrc (host_addr): 178.62.253.21
+  success: src = 178.62.253.21 gateway = 178.62.192.1
+resolving family = IPv4 src = <any> gateway = <not-set> peer 178.62.253.21
+  seeking nothing
+conn: "test" modecfgdns=<unset>
+conn: "test" modecfgdomains=<unset>
+conn: "test" modecfgbanner=<unset>
+conn: "test" mark=<unset>
+conn: "test" mark-in=<unset>
+conn: "test" mark-out=<unset>
+conn: "test" vti_iface=<unset>
+conn: "test" redirect-to=<unset>
+conn: "test" accept-redirect-to=<unset>
+conn: "test" esp=<unset>
+conn: "test" ike=<unset>
+002 "test": added IKEv2 connection
+east #
+ echo "initdone"
+initdone
+east #
+ 

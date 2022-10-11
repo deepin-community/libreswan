@@ -1,0 +1,26 @@
+#!/bin/bash
+
+set -e
+
+tests=()
+
+if [ -x "$(pwd)debian/libreswan/usr/libexec/ipsec/cavp" ] ; then
+    cavp="$(pwd)debian/libreswan/usr/libexec/ipsec/cavp" 
+    echo "Testing built CAVP binary: $cavp"
+else
+    cavp=/usr/libexec/ipsec/cavp
+    echo "Testing installed CAVP binary: $cavp"
+fi
+
+workdir=$(mktemp -d)
+cd "$workdir"
+
+wget --quiet https://download.libreswan.org/cavs/{ikev1_dsa,ikev1_psk,ikev2}.fax.bz2
+bunzip2 *.fax.bz2
+
+"$cavp" -v2 ikev2.fax | diff -u ikev2.fax - > /dev/null
+"$cavp" -v1dsa ikev1_dsa.fax | diff -u ikev1_dsa.fax - > /dev/null
+"$cavp" -v1psk ikev1_psk.fax | diff -u ikev1_psk.fax - > /dev/null
+
+cd -
+rm -rf "$workdir"

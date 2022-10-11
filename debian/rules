@@ -1,0 +1,65 @@
+#!/usr/bin/make -f
+
+include /usr/share/dpkg/default.mk
+
+%:
+	dh $@
+
+# this should track the definition of USERCOMPILE in mk/config.mk:104
+# but without -fstack-protector-all for arches that lack stack-protector
+ifneq (,$(filter $(DEB_HOST_ARCH), hppa alpha ia64))
+export USERCOMPILE = -fno-strict-aliasing -fPIE -DPIE
+endif
+
+ifeq ($(DEB_HOST_ARCH_OS),linux)
+  ENABLE_SELINUX = USE_LABELED_IPSEC=true USE_LINUX_AUDIT=true
+  ENABLE_LIBCAP_NG = USE_LIBCAP_NG=true
+else
+  ENABLE_SELINUX = USE_LABELED_IPSEC=false USE_LINUX_AUDIT=false
+  ENABLE_LIBCAP_NG = USE_LIBCAP_NG=false
+endif
+
+PKG_CONFIG ?= pkg-config
+
+NSS_CFLAGS := $(shell $(PKG_CONFIG) --cflags nss)
+NSS_LDFLAGS := $(shell $(PKG_CONFIG) --libs nss)
+
+CV25519_AVAILABILITY=$(shell if printf '#include <secoidt.h>\nint main() { return SEC_OID_CURVE25519; }' | $(CC) $(NSS_CFLAGS) -x c - -o /dev/null 2> /dev/null; then echo true; else echo false; fi)
+NSS_KDF_AVAILABILITY=$(shell if printf '#include <pkcs11t.h>\n#include <pkcs11n.h>\nint main() { return sizeof(CK_NSS_IKE_PRF_DERIVE_PARAMS) > sizeof(CK_NSS_IKE1_APP_B_PRF_DERIVE_PARAMS); }' | $(CC) $(NSS_CFLAGS) -x c - -o /dev/null 2> /dev/null; then echo true; else echo false; fi)
+IPSEC_PROFILE_AVAILABILITY=$(shell if printf '#include <certt.h>\nint main() { return certificateUsageIPsec; }' | $(CC) $(NSS_CFLAGS) -x c - -o /dev/null 2> /dev/null; then echo true; else echo false; fi)
+NSS_AVA_MISSING=$(shell if printf '#include <cert.h>\nint main() { return CERT_CompareAVA(NULL,NULL); }' | $(CC) $(NSS_CFLAGS) -x c - $(NSS_LDFLAGS) -o /dev/null ; then echo false; else echo true; fi)
+
+DEBIAN_LIBRESWAN_BUILD_FLAGS = \
+		ARCH=$(DEB_HOST_ARCH) \
+		IPSECVERSION=$(DEB_VERSION_UPSTREAM) \
+		PREFIX=/usr \
+		FINALLIBEXECDIR=/usr/libexec/ipsec \
+		FINALMANDIR=/usr/share/man \
+		FINALNSSDIR=/var/lib/ipsec/nss \
+		USE_LDAP=true \
+		USE_LIBCURL=true \
+		USE_AUTHPAM=true \
+		$(ENABLE_LIBCAP_NG) \
+		$(ENABLE_SELINUX) \
+		USE_DH31=$(CV25519_AVAILABILITY) \
+		USE_NSS_KDF=$(NSS_KDF_AVAILABILITY) \
+		USE_NSS_IPSEC_PROFILE=$(IPSEC_PROFILE_AVAILABILITY) \
+		USE_NSS_AVA_COPY=$(NSS_AVA_MISSING) \
+		USE_DNSSEC=true \
+		DEFAULT_DNSSEC_ROOTKEY_FILE=/usr/share/dns/root.key
+
+override_dh_auto_build:
+	dh_auto_build -- programs \
+		$(DEBIAN_LIBRESWAN_BUILD_FLAGS)
+
+override_dh_auto_install-arch:
+	# Add here commands to install the package into debian/libreswan
+	$(MAKE) install \
+		$(DEBIAN_LIBRESWAN_BUILD_FLAGS) \
+		DESTDIR=$(CURDIR)/debian/libreswan
+	find $(CURDIR)/debian/libreswan -iname '*~' -ls -delete
+
+override_dh_auto_test:
+ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
+	debian/tests/cryptocheck
+endif

@@ -1,0 +1,37 @@
+/testing/guestbin/swan-prep
+west #
+ # confirm that the network is alive
+west #
+ ../../guestbin/wait-until-alive -I 192.0.1.254 192.0.2.254
+destination -I 192.0.1.254 192.0.2.254 is alive
+west #
+ ipsec start
+Redirecting to: [initsystem]
+west #
+ ../../guestbin/wait-until-pluto-started
+west #
+ ipsec auto --add replay
+002 "replay": added IKEv2 connection
+west #
+ ipsec whack --impair suppress-retransmits
+west #
+ echo "initdone"
+initdone
+west #
+ # should fail to establish
+west #
+ ipsec whack --impair suppress-retransmits
+west #
+ ipsec auto --up replay
+1v2 "replay" #1: initiating IKEv2 connection
+1v2 "replay" #1: sent IKE_SA_INIT request
+1v2 "replay" #1: sent IKE_AUTH request {cipher=AES_GCM_16_256 integ=n/a prf=HMAC_SHA2_512 group=MODP2048}
+003 "replay" #1: initiator established IKE SA; authenticated using RSASSA-PSS with SHA2_512 and preloaded certificate '@east'
+003 "replay" #2: IKE_AUTH response rejected Child SA with NO_PROPOSAL_CHOSEN
+west #
+ echo done
+done
+west #
+ #
+west #
+ 
