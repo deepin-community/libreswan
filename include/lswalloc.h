@@ -37,8 +37,9 @@ extern void pfree(void *ptr);
 extern void *alloc_bytes(size_t size, const char *name);
 
 /* clone's NULL bytes as NULL bytes, not 1-byte */
-extern void *clone_bytes(const void *orig, size_t size,
-			 const char *name);
+void *clone_bytes(const void *orig, size_t size, const char *name);
+void *clone_bytes_bytes(const void *lhs_ptr, size_t lhs_len,
+			const void *rhs_ptr, size_t rhs_len, const char *name);
 
 void realloc_bytes(void **ptr, size_t old_size, size_t new_size, const char *name);
 
@@ -78,8 +79,9 @@ extern bool report_leaks(struct logger *logger); /* true is bad */
 
 #define alloc_thing(thing, name) ((thing*) alloc_bytes(sizeof(thing), (name)))
 
-#define overalloc_thing(THING, EXTRA, NAME)				\
-	((THING*) alloc_bytes(sizeof(THING) + (EXTRA), (NAME)))
+/* XXX: No NAME parameter; get ready for implicit HERE */
+#define over_alloc_thing(THING, EXTRA)				\
+	((THING*) alloc_bytes(sizeof(THING) + (EXTRA), #THING))
 
 #define alloc_things(THING, COUNT, NAME) ((THING*) alloc_bytes(sizeof(THING) * (COUNT), (NAME)))
 

@@ -40,6 +40,15 @@ enum {
 	secs_per_day = 24 * secs_per_hour
 };
 
+enum binary {
+	binary_per_kilo = UINT64_C(1024),
+	binary_per_mega = UINT64_C(1024) * binary_per_kilo,
+	binary_per_giga = UINT64_C(1024) * binary_per_mega,
+	binary_per_tera = UINT64_C(1024) * binary_per_giga,
+	binary_per_peta = UINT64_C(1024) * binary_per_tera,
+	binary_per_exa  = UINT64_C(1024) * binary_per_peta, /* 2^64 s 16 Exa */
+};
+
 /*
  * This file was split into internal constants (Libreswan/pluto related),
  * and external constants (defined by IETF, etc.)

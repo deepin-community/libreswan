@@ -25,7 +25,18 @@
  *
  */
 
+#include <sys/types.h>
+#include <sys/socket.h>		/* MSG_ERRQUEUE if defined */
+
+#include <errno.h>
 #include <unistd.h>		/* for close() */
+#include <fcntl.h>
+
+#ifdef MSG_ERRQUEUE
+# include <netinet/in.h> 	/* for IP_RECVERR */
+#endif
+
+#include "lsw_socket.h"
 
 #include "defs.h"
 
@@ -40,6 +51,8 @@
 #include "ip_sockaddr.h"
 #include "ip_encap.h"
 #include "kernel.h"			/* for kernel_ops_detect_offload() */
+#include "nat_traversal.h"		/* for nat_traversal_enabled which seems like a broken idea */
+#include "show.h"
 
 char *pluto_listen = NULL;		/* from --listen flag */
 struct iface_endpoint *interfaces = NULL;  /* public interfaces */
@@ -241,6 +254,7 @@ struct iface_endpoint *iface_endpoint_addref_where(struct iface_endpoint *ifp, w
 	return addref_where(ifp, where);
 }
 
+
 struct iface_endpoint *bind_iface_endpoint(struct iface_dev *ifd,
 					   const struct iface_io *io,
 					   ip_port port,
@@ -248,22 +262,124 @@ struct iface_endpoint *bind_iface_endpoint(struct iface_dev *ifd,
 					   bool float_nat_initiator,
 					   struct logger *logger)
 {
+#define BIND_ERROR(MSG, ...)						\
+	{								\
+		int e = errno;						\
+		endpoint_buf eb;					\
+		llog_error(logger, e,					\
+			   "bind %s %s endpoint %s failed, "MSG,	\
+			   ifd->id_rname, io->protocol->name,		\
+			   str_endpoint(&local_endpoint, &eb),		\
+			   ##__VA_ARGS__);				\
+	}
+
+	const struct ip_info *afi = address_type(&ifd->id_address);
 	ip_endpoint local_endpoint = endpoint_from_address_protocol_port(ifd->id_address,
 									 io->protocol, port);
 	if (esp_encapsulation_enabled &&
 	    io->protocol->encap_esp->encap_type == 0) {
-		endpoint_buf b;
-		llog(RC_LOG, logger,
-		     "%s encapsulation on %s interface %s %s is not configured (problem with kernel headers?)",
-		     io->protocol->encap_esp->name,
-		     io->protocol->name,
-		     ifd->id_rname, str_endpoint(&local_endpoint, &b));
+		errno = 0; /*no-errno*/
+		BIND_ERROR("%s encapsulation is not configured (problem with kernel headers?)",
+			   io->protocol->encap_esp->name);
 		return NULL;
 	}
 
-	int fd = io->bind_iface_endpoint(ifd, port, esp_encapsulation_enabled, logger);
+	int fd = cloexec_socket(afi->socket.domain, io->socket.type|SOCK_NONBLOCK, io->protocol->ipproto);
 	if (fd < 0) {
-		/* already logged? */
+		BIND_ERROR("cloexec_socket(%s, %s|SOCK_NONBLOCK, %s)",
+			   afi->socket.domain_name, io->socket.type_name, io->protocol->name);
+		return NULL;
+	}
+
+	static const int on = true;     /* by-reference parameter; constant, we hope */
+
+	if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR,
+		       (const void *)&on, sizeof(on)) < 0) {
+		BIND_ERROR("setsockopt(SOL_SOCKET, SO_REUSEADDR)");
+		close(fd);
+		return NULL;
+	}
+
+#ifdef SO_PRIORITY
+	static const int so_prio = 6; /* rumored maximum priority, might be 7 on linux? */
+	if (setsockopt(fd, SOL_SOCKET, SO_PRIORITY, (const void *)&so_prio,
+		       sizeof(so_prio)) < 0) {
+		BIND_ERROR("setsockopt(SOL_SOCKET, SO_PRIORITY)");
+		/* non-fatal; stumble on */
+	}
+#endif
+
+	if (pluto_sock_bufsize != IKE_BUF_AUTO) {
+#if defined(linux)
+		/*
+		 * Override system maximum
+		 * Requires CAP_NET_ADMIN
+		 */
+		int so_rcv = SO_RCVBUFFORCE;
+		int so_snd = SO_SNDBUFFORCE;
+#else
+		int so_rcv = SO_RCVBUF;
+		int so_snd = SO_SNDBUF;
+#endif
+		if (setsockopt(fd, SOL_SOCKET, so_rcv, (const void *)&pluto_sock_bufsize,
+			       sizeof(pluto_sock_bufsize)) < 0) {
+			BIND_ERROR("setsockopt(SOL_SOCKET, SO_RCVBUFFORCE)");
+			/* non-fatal; stumble on */
+		}
+		if (setsockopt(fd, SOL_SOCKET, so_snd, (const void *)&pluto_sock_bufsize,
+			       sizeof(pluto_sock_bufsize)) < 0) {
+			BIND_ERROR("setsockopt(SOL_SOCKET, SO_SNDBUFFORCE)");
+			/* non-fatal; stumble on */
+		}
+	}
+
+	/* To improve error reporting.  See ip(7). */
+#if defined(IP_RECVERR) && defined(MSG_ERRQUEUE)
+	if (pluto_sock_errqueue) {
+		if (setsockopt(fd, SOL_IP, IP_RECVERR, (const void *)&on, sizeof(on)) < 0) {
+			BIND_ERROR("setsockopt(SOL_IP, IP_RECVERR)");
+			close(fd);
+			return NULL;
+		}
+	}
+#endif
+
+	/*
+	 * With IPv6, there is no fragmentation after it leaves our
+	 * interface.  PMTU discovery is mandatory but doesn't work
+	 * well with IKE (why?).  So we must set the IPV6_USE_MIN_MTU
+	 * option.
+	 *
+	 * See draft-ietf-ipngwg-rfc2292bis-01.txt 11.1
+	 */
+#ifdef IPV6_USE_MIN_MTU /* YUCK: not always defined */
+	if (afi == &ipv6_info &&
+	    setsockopt(fd, IPPROTO_IPV6, IPV6_USE_MIN_MTU,
+		       (const void *)&on, sizeof(on)) < 0) {
+		BIND_ERROR("setsockopt(IPPROTO_IPV6, IPV6_USE_MIN_MTU)");
+		close(fd);
+		return NULL;
+	}
+#endif
+
+	/*
+	 * NETKEY requires us to poke an IPsec policy hole that allows
+	 * IKE packets, unlike KLIPS which implicitly always allows
+	 * plaintext IKE.  This installs one IPsec policy per socket
+	 * but this function is called for each: IPv4 port 500 and
+	 * 4500 IPv6 port 500.
+	 */
+	if (kernel_ops->poke_ipsec_policy_hole != NULL &&
+	    !kernel_ops->poke_ipsec_policy_hole(fd, afi, logger)) {
+		/* already logged */
+		close(fd);
+		return NULL;
+	}
+
+	ip_sockaddr if_sa = sockaddr_from_endpoint(local_endpoint);
+	if (bind(fd, &if_sa.sa.sa, if_sa.len) < 0) {
+		BIND_ERROR("bind()");
+		close(fd);
 		return NULL;
 	}
 
@@ -283,12 +399,22 @@ struct iface_endpoint *bind_iface_endpoint(struct iface_dev *ifd,
 	ifp->next = interfaces;
 	interfaces = ifp;
 
+	if (esp_encapsulation_enabled &&
+	    io->enable_esp_encap != NULL &&
+	    !io->enable_esp_encap(ifp, logger)) {
+		llog(RC_LOG_SERIOUS, logger,
+		     "NAT-Traversal: ESPINUDP for this kernel not supported or not found for family %s; NAT-traversal is turned OFF", afi->af_name);
+		nat_traversal_enabled = false;
+	}
+
 	endpoint_buf b;
 	llog(RC_LOG, logger,
 	     "adding %s interface %s %s",
 	     io->protocol->name, ifp->ip_dev->id_rname,
 	     str_endpoint(&ifp->local_endpoint, &b));
+
 	return ifp;
+#undef BIND_ERROR
 }
 
 /*
@@ -306,7 +432,6 @@ static void add_new_ifaces(struct logger *logger)
 		 * Port 500 must not add the ESP encapsulation prefix.
 		 * And, when NAT is detected, float away.
 		 */
-
 		if (pluto_listen_udp) {
 			if (bind_iface_endpoint(ifd, &udp_iface_io,
 						ip_hport(IKE_UDP_PORT),
@@ -316,34 +441,24 @@ static void add_new_ifaces(struct logger *logger)
 				ifd->ifd_change = IFD_DELETE;
 				continue;
 			}
-
-			/*
-			 * From linux's xfrm: right now, we do not support
-			 * NAT-T on IPv6, because the kernel did not support
-			 * it, and gave an error it one tried to turn it on.
-			 *
-			 * From bsd's kame: right now, we do not support NAT-T
-			 * on IPv6, because the kernel did not support it, and
-			 * gave an error it one tried to turn it on.
-			 *
-			 * XXX: Who should we believe?
-			 *
-			 * Port 4500 can add the ESP encapsulation prefix.
-			 * Let it float to itself - code might rely on it?
-			 */
-			if (address_type(&ifd->id_address) == &ipv4_info) {
-				bind_iface_endpoint(ifd, &udp_iface_io,
-						    ip_hport(NAT_IKE_UDP_PORT),
-						    true /*esp_encapsulation_enabled*/,
-						    true /*float_nat_initiator*/,
-						    logger);
-			}
 		}
 
 		/*
-		 * An explicit {left,right}IKEPORT can't float away.
-		 *
-		 * An explicit {left,right}IKEPORT must enable
+		 * Port 4500 must add the ESP encapsulation
+		 * prefix.  Let it float to itself - code
+		 * might rely on it?
+		 */
+		if (pluto_listen_udp) {
+			/* XXX: ignore any errors!?! */
+			bind_iface_endpoint(ifd, &udp_iface_io,
+					    ip_hport(NAT_IKE_UDP_PORT),
+					    true /*esp_encapsulation_enabled*/,
+					    true /*float_nat_initiator*/,
+					    logger);
+		}
+
+		/*
+		 * An explicit {left,right} IKE TCP PORT must enable
 		 * ESPINUDP so that it can tunnel NAT.  This means
 		 * that incoming packets must add the ESP=0 prefix,
 		 * which in turn means that it can't interop with port
@@ -352,6 +467,7 @@ static void add_new_ifaces(struct logger *logger)
 		 * See comments in iface.h.
 		 */
 		if (pluto_listen_tcp) {
+			/* XXX: ignore any errors!?! */
 			bind_iface_endpoint(ifd, &iketcp_iface_io,
 					    ip_hport(NAT_IKE_UDP_PORT),
 					    true /*esp_encapsulation_enabled*/,
@@ -486,23 +602,6 @@ void show_ifaces_status(struct show *s)
 			     p->ip_dev->id_rname,
 			     p->io->protocol->name,
 			     str_endpoint(&p->local_endpoint, &b));
-	}
-}
-
-/* Called to handle --interface <ifname>
- * Semantics: if specified, only these (real) interfaces are considered.
- */
-
-static const char *pluto_ifn[10];
-static int pluto_ifn_roof = 0;
-
-bool use_interface(const char *rifn)
-{
-	if (pluto_ifn_roof >= (int)elemsof(pluto_ifn)) {
-		return false;
-	} else {
-		pluto_ifn[pluto_ifn_roof++] = rifn;
-		return true;
 	}
 }
 

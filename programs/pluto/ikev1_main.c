@@ -100,6 +100,7 @@
 #include "ikev1_peer_id.h"
 #include "lswnss.h"
 #include "ikev1_vendorid.h"
+#include "ikev1_cert.h"
 
 /*
  * Initiate an Oakley Main Mode exchange.
@@ -299,7 +300,7 @@ struct hash_signature v1_sign_hash_RSA(const struct connection *c,
 				       const struct crypt_mac *hash,
 				       struct logger *logger)
 {
-	const struct private_key_stuff *pks = get_local_private_key(c, &pubkey_type_rsa,
+	const struct secret_stuff *pks = get_local_private_key(c, &pubkey_type_rsa,
 								    logger);
 	if (pks == NULL) {
 		llog(RC_LOG_SERIOUS, logger,
@@ -307,14 +308,8 @@ struct hash_signature v1_sign_hash_RSA(const struct connection *c,
 		return (struct hash_signature) { .len = 0, }; /* failure: no key to use */
 	}
 
-	size_t sz = pks->size;
-	struct hash_signature sig;
-	passert(RSA_MIN_OCTETS <= sz &&
-		4 + hash->len < sz &&
-		sz <= sizeof(sig.ptr/*array*/));
-	sig = pubkey_signer_raw_rsa.sign_hash(pks, hash->ptr, hash->len,
-					      &ike_alg_hash_sha1, logger);
-	passert(sig.len == 0 || sz == sig.len);
+	struct hash_signature sig = pubkey_signer_raw_rsa.sign_hash(pks, hash->ptr, hash->len,
+								    &ike_alg_hash_sha1, logger);
 	return sig;
 }
 
@@ -345,8 +340,10 @@ bool ikev1_encrypt_message(pb_stream *pbs, struct state *st)
 		size_t padding = pad_up(enc_len, e->enc_blocksize);
 
 		if (padding != 0) {
-			if (!out_zero(padding, pbs, "encryption padding"))
-				return false;
+			if (!pbs_out_zero(pbs, padding, "encryption padding")) {
+				/* already logged */
+				return false; /*fatal*/
+			}
 
 			enc_len += padding;
 		}
@@ -409,8 +406,10 @@ bool ikev1_close_message(pb_stream *pbs, const struct state *st)
 		    padding);
 	} else {
 		dbg("padding IKEv1 message with %zu bytes", padding);
-		if (!out_zero(padding, pbs, "message padding"))
-			return false;
+		if (!pbs_out_zero(pbs, padding, "message padding")) {
+			/* already logged */
+			return false; /*fatal*/
+		}
 	}
 
 	close_output_pbs(pbs);
@@ -589,7 +588,7 @@ stf_status main_inR1_outI2(struct state *st, struct msg_digest *md)
 	set_nat_traversal(st, md);
 
 	submit_ke_and_nonce(st, st->st_oakley.ta_dh,
-			    main_inR1_outI2_continue, "outI2 KE");
+			    main_inR1_outI2_continue, HERE);
 	return STF_SUSPEND;
 }
 
@@ -647,8 +646,10 @@ static stf_status main_inR1_outI2_continue(struct state *st,
 					&vid_pbs))
 			return STF_INTERNAL_ERROR;
 
-		if (!out_zero(1500 /*MTU?*/, &vid_pbs, "Filler VID"))
+		if (!pbs_out_zero(&vid_pbs, 1500/*MTU?*/, "Filler VID")) {
+			/* already logged */
 			return STF_INTERNAL_ERROR;
+		}
 
 		close_output_pbs(&vid_pbs);
 	}
@@ -700,14 +701,10 @@ stf_status main_inI2_outR2(struct state *st, struct msg_digest *md)
 	/* decode certificate requests */
 	decode_v1_certificate_requests(st, md);
 
-	if (st->st_requested_ca != NULL)
-		st->hidden_variables.st_v1_got_certrequest = true;
-
 	ikev1_natd_init(st, md);
 
 	submit_ke_and_nonce(st, st->st_oakley.ta_dh,
-			    main_inI2_outR2_continue1,
-			    "inI2_outR2 KE");
+			    main_inI2_outR2_continue1, HERE);
 	return STF_SUSPEND;
 }
 
@@ -797,8 +794,11 @@ static stf_status main_inI2_outR2_continue1(struct state *st,
 		if (!ikev1_out_generic(&isakmp_vendor_id_desc, &rbody,
 				       &vid_pbs))
 			return STF_INTERNAL_ERROR;
-		if (!out_zero(1500 /*MTU?*/, &vid_pbs, "Filler VID"))
+		if (!pbs_out_zero(&vid_pbs, 1500/*MTU?*/, "Filler VID")) {
+			/* already logged */
 			return STF_INTERNAL_ERROR;
+		}
+
 		close_output_pbs(&vid_pbs);
 	}
 
@@ -938,20 +938,16 @@ static stf_status main_inR2_outI3_continue(struct state *st,
 
 	/* decode certificate requests */
 	decode_v1_certificate_requests(st, md);
-
-	if (st->st_requested_ca != NULL)
-		st->hidden_variables.st_v1_got_certrequest = true;
+	bool cert_requested = (st->st_v1_requested_ca != NULL);
 
 	/*
 	 * send certificate if we have one and auth is RSA, and we were
 	 * told we can send one if asked, and we were asked, or we were told
 	 * to always send one.
 	 */
-	bool send_cert = (st->st_oakley.auth == OAKLEY_RSA_SIG &&
-			  mycert != NULL &&
-			  ((c->local->config->host.sendcert == CERT_SENDIFASKED &&
-			    st->hidden_variables.st_v1_got_certrequest) ||
-			   c->local->config->host.sendcert == CERT_ALWAYSSEND));
+	bool send_cert = (st->st_oakley.auth == OAKLEY_RSA_SIG && mycert != NULL &&
+			  ((c->local->config->host.sendcert == CERT_SENDIFASKED && cert_requested) ||
+			   (c->local->config->host.sendcert == CERT_ALWAYSSEND)));
 
 	bool send_authcerts = (send_cert &&
 			  c->send_ca != CA_SEND_NONE);
@@ -972,8 +968,7 @@ static stf_status main_inR2_outI3_continue(struct state *st,
 	}
 
 	doi_log_cert_thinking(st->st_oakley.auth, cert_ike_type(mycert),
-			      c->local->config->host.sendcert,
-			      st->hidden_variables.st_v1_got_certrequest,
+			      c->local->config->host.sendcert, cert_requested,
 			      send_cert, send_authcerts);
 
 	/*
@@ -1104,7 +1099,6 @@ static stf_status main_inR2_outI3_continue(struct state *st,
 		} else {
 			/* SIG_I out */
 			struct hash_signature sig;
-			passert(sizeof(sig.ptr/*array*/) >= RSA_MAX_OCTETS);
 			sig = v1_sign_hash_RSA(c, &hash, st->st_logger);
 			if (sig.len == 0) {
 				/* already logged */
@@ -1199,14 +1193,13 @@ stf_status main_inI3_outR3(struct state *st, struct msg_digest *md)
 	/* send certificate if we have one and auth is RSA */
 	const struct cert *mycert = c->local->config->host.cert.nss_cert != NULL ? &c->local->config->host.cert : NULL;
 
-	bool send_cert = (st->st_oakley.auth == OAKLEY_RSA_SIG &&
-			  mycert != NULL &&
-			  ((c->local->config->host.sendcert == CERT_SENDIFASKED &&
-			    st->hidden_variables.st_v1_got_certrequest) ||
-			   c->local->config->host.sendcert == CERT_ALWAYSSEND));
+	pexpect(st->st_clonedfrom == SOS_NOBODY); /* ISAKMP */
+	bool cert_requested = (st->st_v1_requested_ca != NULL);
+	bool send_cert = (st->st_oakley.auth == OAKLEY_RSA_SIG && mycert != NULL &&
+			  ((c->local->config->host.sendcert == CERT_SENDIFASKED && cert_requested) ||
+			   (c->local->config->host.sendcert == CERT_ALWAYSSEND)));
 
-	bool send_authcerts = (send_cert &&
-			  c->send_ca != CA_SEND_NONE);
+	bool send_authcerts = (send_cert && c->send_ca != CA_SEND_NONE);
 
 	/*****
 	 * From here on, if send_authcerts, we are obligated to:
@@ -1224,8 +1217,7 @@ stf_status main_inI3_outR3(struct state *st, struct msg_digest *md)
 	}
 
 	doi_log_cert_thinking(st->st_oakley.auth, cert_ike_type(mycert),
-			      c->local->config->host.sendcert,
-			      st->hidden_variables.st_v1_got_certrequest,
+			      c->local->config->host.sendcert, cert_requested,
 			      send_cert, send_authcerts);
 
 	/*
@@ -1322,7 +1314,6 @@ stf_status main_inI3_outR3(struct state *st, struct msg_digest *md)
 		} else {
 			/* SIG_R out */
 			struct hash_signature sig;
-			passert(sizeof(sig.ptr/*array*/) >= RSA_MAX_OCTETS);
 			sig = v1_sign_hash_RSA(c, &hash, st->st_logger);
 			if (sig.len == 0) {
 				/* already logged */
@@ -1560,16 +1551,16 @@ static void send_v1_notification(struct logger *logger,
 				 uint8_t protoid)
 {
 	pb_stream r_hdr_pbs;
-	monotime_t n = mononow();
+	const monotime_t now = mononow();
 
 	switch (type) {
 	case v1N_PAYLOAD_MALFORMED:
 		/* only send one per second. */
 		/* ??? this depends on monotime_t having a one-second granularity */
-		if (monobefore(last_malformed, n))
+		if (monobefore(last_malformed, now))
 			return;
 
-		last_malformed = n;
+		last_malformed = now;
 
 		/*
 		 * If a state gets too many of these, delete it.
@@ -1849,13 +1840,13 @@ void send_v1_delete(struct state *st)
 		if (st->st_ah.present) {
 			*ns = said_from_address_protocol_spi(st->st_connection->local->host.addr,
 							     &ip_protocol_ah,
-							     st->st_ah.our_spi);
+							     st->st_ah.inbound.spi);
 			ns++;
 		}
 		if (st->st_esp.present) {
 			*ns = said_from_address_protocol_spi(st->st_connection->local->host.addr,
 							     &ip_protocol_esp,
-							     st->st_esp.our_spi);
+							     st->st_esp.inbound.spi);
 			ns++;
 		}
 
@@ -1898,7 +1889,6 @@ void send_v1_delete(struct state *st)
 
 	/* Delete Payloads */
 	if (isakmp_sa) {
-		pb_stream del_pbs;
 		struct isakmp_delete isad = {
 			.isad_doi = ISAKMP_DOI_IPSEC,
 			.isad_spisize = 2 * COOKIE_SIZE,
@@ -1906,16 +1896,42 @@ void send_v1_delete(struct state *st)
 			.isad_nospi = 1,
 		};
 
-		passert(out_struct(&isad, &isakmp_delete_desc, &r_hdr_pbs,
-				   &del_pbs));
-		passert(out_raw(st->st_ike_spis.initiator.bytes, COOKIE_SIZE,
-				&del_pbs, "initiator SPI"));
-		passert(out_raw(st->st_ike_spis.responder.bytes, COOKIE_SIZE,
-				&del_pbs, "responder SPI"));
-		close_output_pbs(&del_pbs);
+		pb_stream del_pbs;
+		switch (impair.v1_isakmp_delete_payload) {
+		case IMPAIR_EMIT_NO:
+			passert(out_struct(&isad, &isakmp_delete_desc, &r_hdr_pbs, &del_pbs));
+			passert(out_raw(st->st_ike_spis.initiator.bytes, COOKIE_SIZE,
+					&del_pbs, "initiator SPI"));
+			passert(out_raw(st->st_ike_spis.responder.bytes, COOKIE_SIZE,
+					&del_pbs, "responder SPI"));
+			close_output_pbs(&del_pbs);
+			break;
+		case IMPAIR_EMIT_OMIT:
+			llog(RC_LOG, st->st_logger, "IMPAIR: omitting ISKMP delete payload");
+			break;
+		case IMPAIR_EMIT_EMPTY:
+			passert(out_struct(&isad, &isakmp_delete_desc, &r_hdr_pbs, &del_pbs));
+			llog(RC_LOG, st->st_logger, "IMPAIR: emitting empty (i.e., no SPI) ISKMP delete payload");
+			close_output_pbs(&del_pbs);
+			break;
+		case IMPAIR_EMIT_DUPLICATE:
+			llog(RC_LOG, st->st_logger, "IMPAIR: emitting duplicate ISKMP delete payloads");
+			for (unsigned nr = 0; nr < 2; nr++) {
+				passert(out_struct(&isad, &isakmp_delete_desc, &r_hdr_pbs, &del_pbs));
+				passert(out_raw(st->st_ike_spis.initiator.bytes, COOKIE_SIZE,
+						&del_pbs, "initiator SPI"));
+				passert(out_raw(st->st_ike_spis.responder.bytes, COOKIE_SIZE,
+						&del_pbs, "responder SPI"));
+				close_output_pbs(&del_pbs);
+			}
+			break;
+		case IMPAIR_EMIT_ROOF:
+			bad_case(impair.v1_ipsec_delete_payload);
+
+		}
+
 	} else {
 		while (ns != said) {
-			pb_stream del_pbs;
 			ns--;
 			const struct ip_protocol *proto = said_protocol(*ns);
 			struct isakmp_delete isad = {
@@ -1925,11 +1941,37 @@ void send_v1_delete(struct state *st)
 				.isad_nospi = 1,
 			};
 
-			passert(out_struct(&isad, &isakmp_delete_desc,
-					   &r_hdr_pbs, &del_pbs));
-			passert(out_raw(&ns->spi, sizeof(ipsec_spi_t),
-					&del_pbs, "delete payload"));
-			close_output_pbs(&del_pbs);
+			pb_stream del_pbs;
+			switch (impair.v1_ipsec_delete_payload) {
+			case IMPAIR_EMIT_NO:
+				passert(out_struct(&isad, &isakmp_delete_desc,
+						   &r_hdr_pbs, &del_pbs));
+				passert(out_raw(&ns->spi, sizeof(ipsec_spi_t),
+						&del_pbs, "delete payload"));
+				close_output_pbs(&del_pbs);
+				break;
+			case IMPAIR_EMIT_OMIT:
+				llog(RC_LOG, st->st_logger, "IMPAIR: omitting IPsec delete payload");
+				break;
+			case IMPAIR_EMIT_EMPTY:
+				passert(out_struct(&isad, &isakmp_delete_desc,
+						   &r_hdr_pbs, &del_pbs));
+				llog(RC_LOG, st->st_logger, "IMPAIR: emitting empty (i.e., no SPI) IPsec delete payload");
+				close_output_pbs(&del_pbs);
+				break;
+			case IMPAIR_EMIT_DUPLICATE:
+				llog(RC_LOG, st->st_logger, "IMPAIR: emitting duplicte IPsec delete payloads");
+				for (unsigned nr = 0; nr < 2; nr++) {
+					passert(out_struct(&isad, &isakmp_delete_desc,
+							   &r_hdr_pbs, &del_pbs));
+					passert(out_raw(&ns->spi, sizeof(ipsec_spi_t),
+							&del_pbs, "delete payload"));
+					close_output_pbs(&del_pbs);
+				}
+				break;
+			case IMPAIR_EMIT_ROOF:
+				bad_case(impair.v1_ipsec_delete_payload);
+			}
 
 			if (impair.ikev1_del_with_notify) {
 				pb_stream cruft_pbs;
@@ -1984,19 +2026,25 @@ void send_v1_delete(struct state *st)
  * @param md Message Digest
  * @param p Payload digest
  *
- * returns TRUE to indicate st needs to be deleted.
- *	We dare not do that ourselves because st is still in use.
- *	accept_self_delete must be called to do this
- *	at a more appropriate time.
+ * DANGER: this may stomp on *SDP and md->v1_st.
+ *
+ * Returns FALSE when the payload is crud.
  */
-bool accept_delete(struct msg_digest *md,
-		struct payload_digest *p)
+bool accept_delete(struct state **stp,
+		   struct msg_digest *md,
+		   struct payload_digest *p)
 {
-	struct state *st = md->v1_st;
+	struct state *st = *stp;
 	struct isakmp_delete *d = &(p->payload.delete);
 	size_t sizespi;
 	int i;
-	bool self_delete = false;
+
+	/* Need state for things to be encrypted */
+	if (st == NULL) {
+		llog(RC_LOG_SERIOUS, md->md_logger,
+		     "ignoring Delete SA with no matching state");
+		return false;
+	}
 
 	/* We only listen to encrypted notifications */
 	if (!md->encrypted) {
@@ -2031,7 +2079,7 @@ bool accept_delete(struct msg_digest *md,
 
 	case PROTO_IPCOMP:
 		/* nothing interesting to delete */
-		return false;
+		return true;
 
 	default:
 	{
@@ -2090,21 +2138,20 @@ bool accept_delete(struct msg_digest *md,
 				 * identities
 				 */
 				log_state(RC_LOG_SERIOUS, st, "ignoring Delete SA payload: ISAKMP SA used to convey Delete has different IDs from ISAKMP SA it deletes");
-			} else if (dst == st) {
-				/*
-				 * remember this for later:
-				 * we need st to do any remaining deletes
-				 */
-				self_delete = true;
 			} else {
 				/* note: this code is cloned for handling self_delete */
-				log_state(RC_LOG_SERIOUS, st, "received Delete SA payload: deleting ISAKMP State #%lu",
+				log_state(RC_LOG_SERIOUS, st, "received Delete SA payload: %sdeleting ISAKMP State #%lu",
+					  (dst == st ? "self-" : ""),
 					  dst->st_serialno);
 				if (nat_traversal_enabled && dst->st_connection->ikev1_natt != NATT_NONE) {
 					nat_traversal_change_port_lookup(md, dst);
 					v1_maybe_natify_initiator_endpoints(st, HERE);
-			}
+				}
 				delete_state(dst);
+				if (dst == st) {
+					*stp = dst = st = md->v1_st = NULL;
+					return true;
+				}
 			}
 		} else {
 			/*
@@ -2139,15 +2186,16 @@ bool accept_delete(struct msg_digest *md,
 						  ntohl(spi));
 				}
 
-				struct connection *rc = dst->st_connection;
+				/* save for post delete_state() code */
+				co_serial_t rc_serialno = dst->st_connection->serialno;
 
 				if (nat_traversal_enabled && dst->st_connection->ikev1_natt != NATT_NONE) {
 					nat_traversal_change_port_lookup(md, dst);
 					v1_maybe_natify_initiator_endpoints(st, HERE);
 				}
 
-				if (rc->newest_ipsec_sa == dst->st_serialno &&
-					(rc->policy & POLICY_UP)) {
+				if (dst->st_connection->newest_ipsec_sa == dst->st_serialno &&
+				    (dst->st_connection->policy & POLICY_UP)) {
 					/*
 					 * Last IPsec SA for a permanent
 					 * connection that we have initiated.
@@ -2163,15 +2211,23 @@ bool accept_delete(struct msg_digest *md,
 					event_force(EVENT_SA_REPLACE, dst);
 				} else {
 					log_state(RC_LOG_SERIOUS, st,
-						  "received Delete SA(0x%08" PRIx32 ") payload: deleting IPsec State #%lu",
+						  "received Delete SA(0x%08" PRIx32 ") payload: %sdeleting IPsec State #%lu",
 						  ntohl(spi),
+						  (st == dst ? "self-" : ""),
 						  dst->st_serialno);
 					delete_state(dst);
-					if (md->v1_st == dst)
-						md->v1_st = NULL;
+					if (md->v1_st == dst) {
+						*stp = dst = md->v1_st = NULL;
+						return true;
+					}
 				}
 
-				if (rc->newest_ipsec_sa == SOS_NOBODY) {
+				/*
+				 * Either .newest_ipsec_sa matches DST
+				 * and is cleared, or was never set.
+				 */
+				struct connection *rc = connection_by_serialno(rc_serialno);
+				if (rc != NULL && rc->newest_ipsec_sa == SOS_NOBODY) {
 					dbg("%s() connection '%s' -POLICY_UP", __func__, rc->name);
 					rc->policy &= ~POLICY_UP;
 					if (!shared_phase1_connection(rc)) {
@@ -2188,29 +2244,15 @@ bool accept_delete(struct msg_digest *md,
 						 * states tied to the
 						 * connection?
 						 */
+						dbg("%s() self-inflicted delete of ISAKMP", __func__);
 						delete_states_by_connection(&rc);
-						md->v1_st = NULL;
+						*stp = st = dst = md->v1_st = NULL;
+						return true;
 					}
 				}
 			}
 		}
 	}
 
-	return self_delete;
-}
-
-/* now it is safe to delete our sponsor */
-void accept_self_delete(struct msg_digest *md)
-{
-	struct state *st = md->v1_st;
-
-	/* note: this code is cloned from handling ISAKMP non-self_delete */
-	log_state(RC_LOG_SERIOUS, st, "received Delete SA payload: self-deleting ISAKMP State #%lu",
-		  st->st_serialno);
-	if (nat_traversal_enabled && st->st_connection->ikev1_natt != NATT_NONE) {
-		nat_traversal_change_port_lookup(md, st);
-		v1_maybe_natify_initiator_endpoints(st, HERE);
-	}
-	delete_state(st);
-	md->v1_st = st = NULL;
+	return true;
 }

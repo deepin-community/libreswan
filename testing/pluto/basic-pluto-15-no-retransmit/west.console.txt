@@ -27,7 +27,7 @@ west #
 west #
  ipsec auto --up westnet-eastnet-ikev2
 1v2 "westnet-eastnet-ikev2" #3: initiating IKEv2 connection
-1v2 "westnet-eastnet-ikev2" #3: sent IKE_SA_INIT request
+1v2 "westnet-eastnet-ikev2" #3: sent IKE_SA_INIT request to 192.1.2.23:500
 003 "westnet-eastnet-ikev2" #3: dropping unexpected IKE_SA_INIT message containing NO_PROPOSAL_CHOSEN notification; message payloads: N; missing payloads: SA,KE,Ni
 002 "westnet-eastnet-ikev2" #3: IMPAIR: retransmit so deleting SA
 002 "westnet-eastnet-ikev2" #3: deleting state (STATE_V2_PARENT_I1) and NOT sending notification
@@ -42,7 +42,13 @@ XFRM state:
 XFRM policy:
 XFRM done
 IPSEC mangle TABLES
-NEW_IPSEC_CONN mangle TABLES
+iptables filter TABLE
+Chain INPUT (policy ACCEPT)
+target     prot opt source               destination         
+Chain FORWARD (policy ACCEPT)
+target     prot opt source               destination         
+Chain OUTPUT (policy ACCEPT)
+target     prot opt source               destination         
 ROUTING TABLES
 default via 192.1.2.254 dev eth1
 192.0.1.0/24 dev eth0 proto kernel scope link src 192.0.1.254

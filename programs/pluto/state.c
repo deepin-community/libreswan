@@ -67,6 +67,7 @@
 #include "ikev2_proposals.h"		/* for free_ikev2_proposal() */
 #include "ikev2_eap.h"			/* for free_eap_state() */
 #include "lswfips.h"			/* for libreswan_fipsmode() */
+#include "show.h"
 
 bool uniqueIDs = false;
 
@@ -77,11 +78,13 @@ bool uniqueIDs = false;
  */
 uint16_t pluto_nflog_group = 0;
 
+#ifdef XFRM_LIFETIME_DEFAULT
 /*
  * Note: variable is only used to display in ipsec status
  * actual work is done outside pluto, by ipsec _stackmanager
  */
 uint16_t pluto_xfrmlifetime = 30;
+#endif
 
 /*
  * Handle for each and every state.
@@ -330,47 +333,6 @@ void change_v2_state(struct state *st)
 		 st->st_v2_transition = NULL;
 #endif
 	}
-}
-
-/*
- * readable_humber: make large numbers clearer by expressing them as KB or MB,
- * as appropriate.
- * The prefix is literally copied into the output.
- * Tricky representation: if the prefix starts with !, the number
- * is taken as kilobytes.  Thus the caller can avoid scaling, with its
- * risk of overflow.  The ! is not printed.
- */
-static char *readable_humber(uint64_t num,
-			     char *buf,
-			     const char *buf_roof,
-			     const char *prefix)
-{
-	size_t buf_len = buf_roof - buf;
-	uint64_t to_print = num;
-	const char *suffix;
-	int ret;
-	bool kilos = prefix[0] == '!';
-
-	if (!kilos && num < 1024) {
-		suffix = "B";
-	} else {
-		if (!kilos)
-			to_print /= 1024;
-
-		if (to_print < 1024) {
-			suffix = "KB";
-		} else {
-			to_print /= 1024;
-			suffix = "MB";
-		}
-	}
-
-	ret = snprintf(buf, buf_len, "%s%" PRIu64 "%s", prefix, to_print,
-		       suffix + kilos);
-	if (ret < 0 || (size_t) ret >= buf_len)
-		return buf;
-
-	return buf + ret;
 }
 
 static size_t jam_readable_humber(struct jambuf *buf, uint64_t num, bool kilos)
@@ -893,6 +855,32 @@ void delete_state(struct state *st)
 	delete_state_tail(st);
 }
 
+static void log_and_update_traffic(struct state *st, const char *name, struct ipsec_proto_info *traffic)
+{
+	LLOG_JAMBUF(RC_INFORMATIONAL, st->st_logger, buf) {
+		jam(buf, "%s traffic information:", name);
+		/* in */
+		jam_string(buf, " in=");
+		jam_humber(buf, traffic->inbound.bytes);
+		jam_string(buf, "B");
+		/* out */
+		jam_string(buf, " out=");
+		jam_humber(buf, traffic->outbound.bytes);
+		jam_string(buf, "B");
+		if (st->st_xauth_username[0] != '\0') {
+			jam_string(buf, " XAUTHuser=");
+			jam_string(buf, st->st_xauth_username);
+		}
+	}
+	/*
+	 * XXX: this double counts ESP+IPCOMP; or would if IPCOMP
+	 * returned the correct byte-count (instead of zero) when
+	 * wrapped in ESP.
+	 */
+	pstats_ipsec_in_bytes += traffic->inbound.bytes;
+	pstats_ipsec_out_bytes += traffic->outbound.bytes;
+}
+
 void delete_state_tail(struct state *st)
 {
 	pstat_sa_deleted(st);
@@ -973,60 +961,15 @@ void delete_state_tail(struct state *st)
 		 * ESP/AH/IPCOMP
 		 */
 		if (st->st_esp.present) {
-			char statebuf[1024];
-			char *sbcp = readable_humber(st->st_esp.our_bytes,
-					       statebuf,
-					       statebuf + sizeof(statebuf),
-					       "ESP traffic information: in=");
-
-			(void)readable_humber(st->st_esp.peer_bytes,
-					       sbcp,
-					       statebuf + sizeof(statebuf),
-					       " out=");
-			log_state(RC_INFORMATIONAL, st, "%s%s%s",
-				  statebuf,
-				  st->st_xauth_username[0] != '\0' ? " XAUTHuser=" : "",
-				  st->st_xauth_username);
-			pstats_ipsec_in_bytes += st->st_esp.our_bytes;
-			pstats_ipsec_out_bytes += st->st_esp.peer_bytes;
+			log_and_update_traffic(st, "ESP", &st->st_esp);
 		}
 
 		if (st->st_ah.present) {
-			char statebuf[1024];
-			char *sbcp = readable_humber(st->st_ah.peer_bytes,
-					       statebuf,
-					       statebuf + sizeof(statebuf),
-					       "AH traffic information: in=");
-
-			(void)readable_humber(st->st_ah.our_bytes,
-					       sbcp,
-					       statebuf + sizeof(statebuf),
-					       " out=");
-			log_state(RC_INFORMATIONAL, st, "%s%s%s",
-				  statebuf,
-				  st->st_xauth_username[0] != '\0' ? " XAUTHuser=" : "",
-				  st->st_xauth_username);
-			pstats_ipsec_in_bytes += st->st_ah.peer_bytes;
-			pstats_ipsec_out_bytes += st->st_ah.our_bytes;
+			log_and_update_traffic(st, "AH", &st->st_ah);
 		}
 
 		if (st->st_ipcomp.present) {
-			char statebuf[1024];
-			char *sbcp = readable_humber(st->st_ipcomp.peer_bytes,
-					       statebuf,
-					       statebuf + sizeof(statebuf),
-					       "IPCOMP traffic information: in=");
-
-			(void)readable_humber(st->st_ipcomp.our_bytes,
-					       sbcp,
-					       statebuf + sizeof(statebuf),
-					       " out=");
-			log_state(RC_INFORMATIONAL, st, "%s%s%s",
-				  statebuf,
-				  st->st_xauth_username[0] != '\0' ? " XAUTHuser=" : "",
-				  st->st_xauth_username);
-			pstats_ipsec_in_bytes += st->st_ipcomp.peer_bytes;
-			pstats_ipsec_out_bytes += st->st_ipcomp.our_bytes;
+			log_and_update_traffic(st, "IPCOMP", &st->st_ipcomp);
 		}
 	}
 
@@ -1192,9 +1135,9 @@ void delete_state_tail(struct state *st)
 #ifdef USE_IKEv1
 	ikev1_clear_msgid_list(st);
 #endif
-	pubkey_delref(&st->st_peer_pubkey, HERE);
-	free_eap_state(&st->st_eap);
+	pubkey_delref(&st->st_peer_pubkey);
 	md_delref(&st->st_eap_sa_md);
+	free_eap_state(&st->st_eap);
 
 	free_ikev2_proposals(&st->st_v2_create_child_sa_proposals);
 	free_ikev2_proposal(&st->st_v2_accepted_proposal);
@@ -1208,7 +1151,7 @@ void delete_state_tail(struct state *st)
 	release_certs(&st->st_remote_certs.verified);
 	free_public_keys(&st->st_remote_certs.pubkey_db);
 
-	free_generalNames(st->st_requested_ca, true);
+	free_generalNames(st->st_v1_requested_ca, true);
 
 	free_chunk_content(&st->st_firstpacket_me);
 	free_chunk_content(&st->st_firstpacket_peer);
@@ -1247,6 +1190,19 @@ void delete_state_tail(struct state *st)
 	free_chunk_content(&st->st_skey_chunk_SK_pi);
 	free_chunk_content(&st->st_skey_chunk_SK_pr);
 
+#define wipe_any_chunk(C)				\
+	{						\
+		if (C.ptr != NULL) {			\
+			memset(C.ptr, 0, C.len);	\
+			free_chunk_content(&(C));	\
+		}					\
+	}
+	wipe_any_chunk(st->st_ah.inbound.keymat);
+	wipe_any_chunk(st->st_ah.outbound.keymat);
+	wipe_any_chunk(st->st_esp.inbound.keymat);
+	wipe_any_chunk(st->st_esp.outbound.keymat);
+#undef wipe_any_chunk
+
 #   define wipe_any(p, l) { \
 		if ((p) != NULL) { \
 			memset((p), 0x00, (l)); \
@@ -1254,11 +1210,6 @@ void delete_state_tail(struct state *st)
 			(p) = NULL; \
 		} \
 	}
-	wipe_any(st->st_ah.our_keymat, st->st_ah.keymat_len);
-	wipe_any(st->st_ah.peer_keymat, st->st_ah.keymat_len);
-	wipe_any(st->st_esp.our_keymat, st->st_esp.keymat_len);
-	wipe_any(st->st_esp.peer_keymat, st->st_esp.keymat_len);
-
 	wipe_any(st->st_xauth_password.ptr, st->st_xauth_password.len);
 #   undef wipe_any
 
@@ -1619,7 +1570,7 @@ static struct state *duplicate_state(struct connection *c,
 	/* we should really split the NOTIFY loop in two cleaner ones */
 	nst->st_ipcomp.attrs = st->st_ipcomp.attrs;
 	nst->st_ipcomp.present = st->st_ipcomp.present;
-	nst->st_ipcomp.our_spi = st->st_ipcomp.our_spi;
+	nst->st_ipcomp.inbound.spi = st->st_ipcomp.inbound.spi;
 
 	if (sa_type == IPSEC_SA) {
 #   define clone_nss_symkey_field(field) nst->field = reference_symkey(__func__, #field, st->field)
@@ -1763,11 +1714,14 @@ struct ike_sa *find_v2_ike_sa_by_initiator_spi(const ike_spi_t *ike_initiator_sp
 struct v2_spi_filter {
 	uint8_t protoid;
 	ipsec_spi_t outbound_spi;
+	ipsec_spi_t inbound_spi;
+	ip_address *dst;
 };
 
 static bool v2_spi_predicate(struct state *st, void *context)
 {
 	struct v2_spi_filter *filter = context;
+	bool ret = false;
 
 	struct ipsec_proto_info *pr;
 	switch (filter->protoid) {
@@ -1777,20 +1731,39 @@ static bool v2_spi_predicate(struct state *st, void *context)
 	case PROTO_IPSEC_ESP:
 		pr = &st->st_esp;
 		break;
+	case PROTO_IPCOMP:
+		pr = &st->st_ipcomp;
+		break;
 	default:
 		bad_case(filter->protoid);
 	}
 
 	if (pr->present) {
-		if (pr->attrs.spi == filter->outbound_spi) {
+		if (pr->outbound.spi == filter->outbound_spi) {
 			dbg("v2 CHILD SA #%lu found using their inbound (our outbound) SPI, in %s",
-			    st->st_serialno,
-			    st->st_state->name);
-			return true;
+			    st->st_serialno, st->st_state->name);
+			ret = true;
+			if (filter->dst != NULL) {
+				ret = false;
+				if (sameaddr(&st->st_connection->remote->host.addr,
+					     filter->dst))
+					ret = true;
+			}
+		} else if (filter->inbound_spi > 0 &&
+				filter->inbound_spi == pr->inbound.spi) {
+			dbg("v2 CHILD SA #%lu found using their our SPI, in %s",
+			    st->st_serialno, st->st_state->name);
+			ret = true;
+			if (filter->dst != NULL) {
+				ret = false;
+				if (sameaddr(&st->st_connection->local->host.addr,
+				    filter->dst))
+					ret = true;
+			}
 		}
 #if 0
 		/* see function description above */
-		if (pr->our_spi == filter->outbound_spi) {
+		if (pr->inbound.spi == filter->outbound_spi) {
 			dbg("v2 CHILD SA #%lu found using our inbound (their outbound) !?! SPI, in %s",
 			    st->st_serialno,
 			    st->st_state->name);
@@ -1798,7 +1771,26 @@ static bool v2_spi_predicate(struct state *st, void *context)
 		}
 #endif
 	}
-	return false;
+	return ret;
+}
+
+struct child_sa *find_v2_child_sa_by_spi(ipsec_spi_t spi, int8_t protoid,
+					 ip_address *dst)
+{
+	struct v2_spi_filter filter = {
+		.protoid = protoid,
+		.outbound_spi = spi,
+		/* fill the same spi, the kernel expire has no direction */
+		.inbound_spi = spi,
+		.dst = dst,
+	};
+	struct state_filter sf = { .where = HERE, };
+	while (next_state_new2old(&sf)) {
+		struct state *st = sf.st;
+		if (v2_spi_predicate(st, &filter))
+			break;
+	};
+	return pexpect_child_sa(sf.st);
 }
 
 struct child_sa *find_v2_child_sa_by_outbound_spi(struct ike_sa *ike,
@@ -1882,12 +1874,12 @@ struct state *find_phase2_state_to_delete(const struct state *p1st,
 					&st->st_ah : &st->st_esp;
 
 			if (pr->present) {
-				if (pr->attrs.spi == spi) {
+				if (pr->outbound.spi == spi) {
 					*bogus = false;
 					return st;
 				}
 
-				if (pr->our_spi == spi) {
+				if (pr->inbound.spi == spi) {
 					*bogus = true;
 					bogusst = st;
 					/* don't return! */
@@ -1908,7 +1900,7 @@ bool ikev2_viable_parent(const struct ike_sa *ike)
 	if (ike->sa.st_ike_version != IKEv2)
 		return true;
 
-	monotime_t now = mononow();
+	const monotime_t now = mononow();
 	const struct state_event *ev = ike->sa.st_v2_lifetime_event;
 	deltatime_t lifetime = monotimediff(ev->ev_time, now);
 
@@ -1983,6 +1975,20 @@ void state_eroute_usage(const ip_selector *ours, const ip_selector *peers,
 	}
 }
 
+void jam_humber_max(struct jambuf *buf,
+		    const char *prefix, uintmax_t val, const char *suffix)
+{
+	jam_string(buf, prefix);
+	if (/*double-negative*/ !(pexpect(val <= IPSEC_SA_MAX_OPERATIONS))) {
+		jam(buf, "%ju", val);
+	} else if (val == IPSEC_SA_MAX_OPERATIONS) {
+		jam_string(buf, IPSEC_SA_MAX_OPERATIONS_STRING);
+	} else {
+		jam_humber(buf, val);
+	}
+	jam_string(buf, suffix);
+}
+
 /* note: this mutates *st by calling get_sa_bundle_info */
 static void jam_state_traffic(struct jambuf *buf, struct state *st)
 {
@@ -2000,17 +2006,20 @@ static void jam_state_traffic(struct jambuf *buf, struct state *st)
 	    st->st_esp.add_time);
 
 	if (get_sa_bundle_info(st, true, NULL)) {
-		unsigned inb = (st->st_esp.present ? st->st_esp.our_bytes:
-				st->st_ah.present ? st->st_ah.our_bytes :
-				st->st_ipcomp.present ? st->st_ipcomp.our_bytes : 0);
+		unsigned inb = (st->st_esp.present ? st->st_esp.inbound.bytes:
+				st->st_ah.present ? st->st_ah.inbound.bytes :
+				st->st_ipcomp.present ? st->st_ipcomp.inbound.bytes : 0);
 		jam(buf, ", inBytes=%u", inb);
 	}
 
 	if (get_sa_bundle_info(st, false, NULL)) {
-		unsigned outb = (st->st_esp.present ? st->st_esp.peer_bytes :
-				 st->st_ah.present ? st->st_ah.peer_bytes :
-				 st->st_ipcomp.present ? st->st_ipcomp.peer_bytes : 0);
-		jam(buf, ", outBytes=%u", outb);
+		uintmax_t outb = (st->st_esp.present ? st->st_esp.outbound.bytes :
+				  st->st_ah.present ? st->st_ah.outbound.bytes :
+				  st->st_ipcomp.present ? st->st_ipcomp.outbound.bytes : 0);
+		jam(buf, ", outBytes=%ju", outb);
+		if (c->config->sa_ipsec_max_bytes != 0) {
+			jam_humber_max(buf, ", maxBytes=", c->config->sa_ipsec_max_bytes, "B");
+		}
 	}
 
 	if (st->st_xauth_username[0] == '\0') {
@@ -2123,8 +2132,9 @@ static void show_state(struct show *s, struct state *st, const monotime_t now)
 			/* ??? why is printing -1 better than 0? */
 			/* XXX: because config uses -1 for disabled? */
 			jam(buf, " lastdpd=%jds(seq in:%u out:%u);",
-			    !is_monotime_epoch(st->st_last_dpd) ?
-			    deltasecs(monotimediff(mononow(), st->st_last_dpd)) : (intmax_t)-1,
+			    (!is_monotime_epoch(st->st_last_dpd) ?
+			     deltasecs(monotimediff(now, st->st_last_dpd)) :
+			     (intmax_t)-1),
 			    st->st_dpd_seqno,
 			    st->st_dpd_expectseqno);
 		} else if (dpd_active_locally(st->st_connection) && (st->st_ike_version == IKEv2)) {
@@ -2133,7 +2143,7 @@ static void show_state(struct show *s, struct state *st, const monotime_t now)
 				struct state *pst = state_by_serialno(st->st_clonedfrom);
 				if (pst != NULL) {
 					jam(buf, " lastlive=%jds;",
-					    deltasecs(monotimediff(mononow(), pst->st_v2_msgid_windows.last_recv)));
+					    deltasecs(monotimediff(now, pst->st_v2_msgid_windows.last_recv)));
 				}
 			}
 		} else if (st->st_ike_version == IKEv1) {
@@ -2151,7 +2161,8 @@ static void show_state(struct show *s, struct state *st, const monotime_t now)
 	}
 }
 
-static void show_established_child_details(struct show *s, struct state *st)
+static void show_established_child_details(struct show *s, struct state *st,
+					   const monotime_t now)
 {
 	SHOW_JAMBUF(RC_COMMENT, s, buf) {
 		const struct connection *c = st->st_connection;
@@ -2166,8 +2177,7 @@ static void show_established_child_details(struct show *s, struct state *st)
 		if (c->spd.eroute_owner == st->st_serialno &&
 		    st->st_outbound_count != 0) {
 			jam(buf, " used %jds ago;",
-			    deltasecs(monotimediff(mononow(),
-						   st->st_outbound_time)));
+			    deltasecs(monotimediff(now , st->st_outbound_time)));
 		}
 
 #define add_said(ADDRESS, PROTOCOL, SPI)				\
@@ -2184,26 +2194,26 @@ static void show_established_child_details(struct show *s, struct state *st)
 		if (st->st_ah.present) {
 			add_said(c->remote->host.addr,
 				 &ip_protocol_ah,
-				 st->st_ah.attrs.spi);
+				 st->st_ah.outbound.spi);
 			add_said(c->local->host.addr,
 				 &ip_protocol_ah,
-				 st->st_ah.our_spi);
+				 st->st_ah.inbound.spi);
 		}
 		if (st->st_esp.present) {
 			add_said(c->remote->host.addr,
 				 &ip_protocol_esp,
-				 st->st_esp.attrs.spi);
+				 st->st_esp.outbound.spi);
 			add_said(c->local->host.addr,
 				 &ip_protocol_esp,
-				 st->st_esp.our_spi);
+				 st->st_esp.inbound.spi);
 		}
 		if (st->st_ipcomp.present) {
 			add_said(c->remote->host.addr,
 				 &ip_protocol_ipcomp,
-				 st->st_ipcomp.attrs.spi);
+				 st->st_ipcomp.outbound.spi);
 			add_said(c->local->host.addr,
 				 &ip_protocol_ipcomp,
-				 st->st_ipcomp.our_spi);
+				 st->st_ipcomp.inbound.spi);
 		}
 #if defined(KERNEL_XFRM)
 		if (st->st_ah.attrs.mode == ENCAPSULATION_MODE_TUNNEL ||
@@ -2241,38 +2251,35 @@ static void show_established_child_details(struct show *s, struct state *st)
 		if (st->st_ah.present) {
 			if (in_info) {
 				jam(buf, " AHin=");
-				jam_readable_humber(buf, first_sa->our_bytes, false);
+				jam_readable_humber(buf, first_sa->inbound.bytes, false);
 			}
 			if (out_info) {
 				jam(buf, " AHout=");
-				jam_readable_humber(buf, first_sa->peer_bytes, false);
+				jam_readable_humber(buf, first_sa->outbound.bytes, false);
 			}
-			jam(buf, " AHmax=");		/* TBD: "The ! is not printed." */
-			jam_readable_humber(buf, first_sa->attrs.life_kilobytes, true);
+			jam_humber_max(buf, " AHmax=", c->config->sa_ipsec_max_bytes, "B");
 		}
 		if (st->st_esp.present) {
 			if (in_info) {
 				jam(buf, " ESPin=");
-				jam_readable_humber(buf, first_sa->our_bytes, false);
+				jam_readable_humber(buf, first_sa->inbound.bytes, false);
 			}
 			if (out_info) {
 				jam(buf, " ESPout=");
-				jam_readable_humber(buf, first_sa->peer_bytes, false);
+				jam_readable_humber(buf, first_sa->outbound.bytes, false);
 			}
-			jam(buf, " ESPmax=");		/* TBD: "The ! is not printed." */
-			jam_readable_humber(buf, first_sa->attrs.life_kilobytes, true);
+			jam_humber_max(buf, " ESPmax=", c->config->sa_ipsec_max_bytes, "B");
 		}
 		if (st->st_ipcomp.present) {
 			if (in_info) {
 				jam(buf, " IPCOMPin=");
-				jam_readable_humber(buf, first_sa->our_bytes, false);
+				jam_readable_humber(buf, first_sa->inbound.bytes, false);
 			}
 			if (out_info) {
 				jam(buf, " IPCOMPout=");
-				jam_readable_humber(buf, first_sa->peer_bytes, false);
+				jam_readable_humber(buf, first_sa->outbound.bytes, false);
 			}
-			jam(buf, "! IPCOMPmax=");	/* TBD: "The ! is not printed." */
-			jam_readable_humber(buf, first_sa->attrs.life_kilobytes, true);
+			jam_humber_max(buf, " IPCOMPmax=", c->config->sa_ipsec_max_bytes, "B");
 		}
 
 		jam(buf, " "); /* TBD: trailing blank */
@@ -2449,13 +2456,12 @@ void show_brief_status(struct show *s)
 		  cat_count_child_sa[CAT_ANONYMOUS]);
 }
 
-void show_states(struct show *s)
+void show_states(struct show *s, const monotime_t now)
 {
 	show_separator(s);
 	struct state **array = sort_states(state_compare_connection, HERE);
 
 	if (array != NULL) {
-		monotime_t now = mononow();
 		/* now print sorted results */
 		int i;
 		for (i = 0; array[i] != NULL; i++) {
@@ -2463,7 +2469,7 @@ void show_states(struct show *s)
 			show_state(s, st, now);
 			if (IS_IPSEC_SA_ESTABLISHED(st)) {
 				/* print out SPIs if SAs are established */
-				show_established_child_details(s, st);
+				show_established_child_details(s, st, now);
 			}  else if (IS_IKE_SA(st)) {
 				/* show any associated pending Phase 2s */
 				show_pending_child_details(s, st->st_connection,
@@ -2494,7 +2500,7 @@ startover:
 	while (next_state_new2old(&sf)) {
 		struct state *st = sf.st;
 		if (st->st_ipcomp.present) {
-			cpi_t c = ntohl(st->st_ipcomp.our_spi) - base;
+			cpi_t c = ntohl(st->st_ipcomp.inbound.spi) - base;
 
 			if (c < closest) {
 				if (c == 0) {
@@ -2550,7 +2556,7 @@ ipsec_spi_t uniquify_peer_cpi(ipsec_spi_t cpi, const struct state *st, int tries
 		if (s->st_ipcomp.present &&
 		    sameaddr(&s->st_connection->remote->host.addr,
 			     &st->st_connection->remote->host.addr) &&
-		    cpi == s->st_ipcomp.attrs.spi)
+		    cpi == s->st_ipcomp.outbound.spi)
 		{
 			if (++tries == 20)
 				return 0; /* FAILURE */
@@ -3124,7 +3130,7 @@ void suppress_delete_notify(const struct ike_sa *ike,
 }
 
 static void list_state_event(struct show *s, struct state *st,
-			     struct state_event *pe, monotime_t now)
+			     struct state_event *pe, const monotime_t now)
 {
 	if (pe != NULL) {
 		pexpect(st == pe->ev_state);
@@ -3143,7 +3149,7 @@ static void list_state_event(struct show *s, struct state *st,
 	}
 }
 
-void list_state_events(struct show *s, monotime_t now)
+void list_state_events(struct show *s, const monotime_t now)
 {
 	struct state_filter sf = {
 		.where = HERE,
@@ -3326,4 +3332,25 @@ void DBG_tcpdump_ike_sa_keys(const struct state *st)
 		tispi, trspi,
 		authalgo, tar,
 		encalgo, tekl, ter);
+}
+
+void set_sa_expire_next_event(enum event_type next_event, struct state *st)
+{
+	switch (st->st_ike_version) {
+	case IKEv2:
+		event_delete(EVENT_v2_LIVENESS, st);
+		if (next_event == EVENT_NULL)
+			next_event = EVENT_v2_REKEY;
+
+		break;
+	case IKEv1:
+		event_delete(EVENT_v1_DPD, st);
+		if (next_event == EVENT_NULL)
+			next_event = EVENT_SA_REPLACE;
+		break;
+	default:
+		bad_case(st->st_ike_version);
+	}
+
+	event_force(next_event, st);
 }

@@ -185,6 +185,7 @@ enum stream {
 	 * typically via -v).
 	 */
 #define ERROR_FLAGS (ERROR_STREAM|RC_LOG_SERIOUS)
+#define PRINTF_FLAGS (NO_PREFIX|WHACK_STREAM)
 };
 
 /*
@@ -269,6 +270,25 @@ void llog_dump(lset_t rc_flags,
 		llog_dump(RC_FLAGS, LOGGER, hunk_->ptr, hunk_->len);	\
 	}
 
+void llog_base64_bytes(lset_t rc_flags,
+		       const struct logger *log,
+		       const void *p, size_t len);
+#define llog_base64_hunk(RC_FLAGS, LOGGER, HUNK)			\
+	{								\
+		const typeof(HUNK) *hunk_ = &(HUNK); /* evaluate once */ \
+		llog_base64_bytes(RC_FLAGS, LOGGER, hunk_->ptr, hunk_->len); \
+	}
+
+void llog_pem_bytes(lset_t rc_flags,
+		    const struct logger *log,
+		    const char *name,
+		    const void *p, size_t len);
+#define llog_pem_hunk(RC_FLAGS, LOGGER, NAME, HUNK)			\
+	{								\
+		const typeof(HUNK) *hunk_ = &(HUNK); /* evaluate once */ \
+		llog_pem_bytes(RC_FLAGS, LOGGER, NAME, hunk_->ptr, hunk_->len); \
+	}
+
 /*
  * Wrap <message> in a prefix and suffix where the suffix contains
  * errno and message.
@@ -287,7 +307,7 @@ void libreswan_exit(enum pluto_exit_code rc) NEVER_RETURNS;
 
 /*
  * XXX: The message format is:
- *   ERROR: <log-prefix><message...>[. Errno: <errno>: <strerr>"]
+ *   ERROR: <log-prefix><message...>[: <strerr> (errno)]
  * and not:
  *   <log-prefix>ERROR: <message...>...
  */
@@ -295,7 +315,7 @@ void libreswan_exit(enum pluto_exit_code rc) NEVER_RETURNS;
 void log_error(struct logger *logger, int error,
 	       const char *message, ...) PRINTF_LIKE(3);
 
-#define log_errno(LOGGER, ERRNO, FMT, ...)				\
+#define llog_error(LOGGER, ERRNO, FMT, ...)				\
 	{								\
 		int e_ = ERRNO; /* save value across va args */		\
 		log_error(LOGGER, e_, FMT, ##__VA_ARGS__); \

@@ -30,34 +30,31 @@
  * for more details.
  */
 
-#ifndef _STATE_H
-#define _STATE_H
+#ifndef STATE_H
+#define STATE_H
 
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include "quirks.h"
+#include <stddef.h>		/* for size_t */
+#include <stdbool.h>
+
+#include <pk11pub.h>
+#include <x509.h>
 
 #include "deltatime.h"
 #include "monotime.h"
 #include "reqid.h"
 #include "fd.h"
 #include "crypt_mac.h"
+#include "ip_subnet.h"
+#include "ip_endpoint.h"
+#include "ip_selector.h"
 
-#include <pk11pub.h>
-#include <x509.h>
-
+#include "quirks.h"
 #include "list_entry.h"
 #include "retransmit.h"
 #include "ikev2_ts.h"		/* for struct traffic_selector */
-#include "ip_subnet.h"
 #include "ike_spi.h"
 #include "pluto_timing.h"	/* for statetime_t */
 #include "ikev2_msgid.h"
-#include "ip_endpoint.h"
-#include "ip_selector.h"
-#include "crypt_mac.h"
-#include "show.h"
 
 struct v2_state_transition;
 struct ikev2_ipseckey_dns; /* forward declaration of tag */
@@ -116,7 +113,6 @@ struct trans_attrs {
 	bool esn_enabled;               /* IKEv2 ESN (extended sequence numbers) */
 
 	deltatime_t life_seconds;	/* max life of this SA in seconds */
-	uint32_t life_kilobytes;	/* max life of this SA in kilobytes */
 
 	/* negotiated crypto-suite */
 	const struct encrypt_desc *ta_encrypt;	/* package of encryption routines */
@@ -139,35 +135,40 @@ enum send_delete {
 	DO_SEND_DELETE,
 };
 
-/* IPsec (Phase 2 / Quick Mode) transform and attributes
- * This is a flattened/decoded version of what is represented
- * by a Transaction Payload.  There may be one for AH, one
- * for ESP, and a funny one for IPCOMP.
+/*
+ * IPsec (Phase 2 / Quick Mode) transform and attributes This is a
+ * flattened/decoded version of what is represented by a Transaction
+ * Payload.  There may be one for AH, one for ESP, and a funny one for
+ * IPCOMP.
  *
- * Yes, this is screwy -- we keep different direction information
- * in different places. Fix it up sometime.
+ * Yes, this is screwy -- we keep different direction information in
+ * different places. Fix it up sometime.
  */
 struct ipsec_trans_attrs {
 	struct trans_attrs transattrs;
-	ipsec_spi_t spi;                /* their SPI */
 	deltatime_t life_seconds;	/* max life of this SA in seconds */
-	uint32_t life_kilobytes;	/* max life of this SA in kilobytes */
 	enum encapsulation_mode mode;	/* transport or tunnel or ... */
 };
 
-/* IPsec per protocol state information */
+/*
+ * IPsec per protocol state information.
+ */
+
+struct ipsec_flow {
+	lset_t kernel_sa_expired;
+	uint64_t bytes;
+	monotime_t last_used;
+	chunk_t keymat;
+	ipsec_spi_t spi;
+};
+
 struct ipsec_proto_info {
 	const struct ip_protocol *protocol;	/* ESP, AH, COMP, ... */
 	bool present;				/* was this transform negotiated? */
 	struct ipsec_trans_attrs attrs; /* info on remote */
+	struct ipsec_flow inbound;
+	struct ipsec_flow outbound;
 	ipsec_spi_t our_spi;
-	uint16_t keymat_len;           /* same for both */
-	uint8_t *our_keymat;
-	uint8_t *peer_keymat;
-	uint64_t our_bytes;
-	uint64_t peer_bytes;
-	monotime_t our_lastused;
-	monotime_t peer_lastused;
 	uint64_t add_time;
 };
 
@@ -193,12 +194,6 @@ struct hidden_variables {
 	int st_xauth_client_attempt;
 	bool st_modecfg_server_done;
 	bool st_modecfg_vars_set;
-	/*
-	 * XXX: suspect this is redundant and instead .st_requested_ca
-	 * ca be chedk.  One possible got-ya is if IKEv1 sets this in
-	 * the ISAKMP SA but tests it in a cloned IPsec SA.
-	 */
-	bool st_v1_got_certrequest;
 	bool st_modecfg_started;
 	bool st_skeyid_calculated;
 	bool st_peer_supports_dpd;              /* Peer supports DPD/IKEv2 Liveness
@@ -748,7 +743,7 @@ struct state {
 	bool st_seen_and_use_transport_mode;	/* did we receive USE_TRANSPORT_MODE */
 	bool st_seen_redirect_sup;		/* did we receive IKEv2_REDIRECT_SUPPORTED */
 	bool st_sent_redirect;			/* did we send IKEv2_REDIRECT in IKE_AUTH (response) */
-	generalName_t *st_requested_ca;		/* collected certificate requests */
+	generalName_t *st_v1_requested_ca;	/* collected certificate requests */
 	uint8_t st_reply_xchg;
 	bool st_peer_wants_null;		/* We received IDr payload of type ID_NULL (and we allow auth=NULL / authby=NULL */
 
@@ -761,6 +756,12 @@ struct state {
 	bool st_ike_seen_v2n_mobike_supported;	/* did we receive MOBIKE_SUPPORTED */
 	bool st_ike_seen_v2n_initial_contact;	/* did we receive INITIAL_CONTACT */
 	bool st_v2_childless_ikev2_supported;	/* childless exchange? */
+	/* this a fuzzy bool */
+	enum {
+		SEEN_NO_v2CERTREQ = 0,
+		SEEN_EMPTY_v2CERTREQ = 1,
+		SEEN_FULL_v2CERTREQ = 2,
+	} st_v2_ike_seen_certreq;
 };
 
 /*
@@ -798,7 +799,9 @@ struct child_sa *pexpect_child_sa_where(struct state *st, where_t where);
 /* global variables */
 
 extern uint16_t pluto_nflog_group;	/* NFLOG group - 0 means no logging */
+#ifdef XFRM_LIFETIME_DEFAULT
 extern uint16_t pluto_xfrmlifetime;	/* only used to display in status */
+#endif
 
 extern bool states_use_connection(const struct connection *c);
 
@@ -871,7 +874,7 @@ extern void initialize_new_state(struct state *st,
 
 extern void show_traffic_status(struct show *s, const char *name);
 extern void show_brief_status(struct show *s);
-extern void show_states(struct show *s);
+extern void show_states(struct show *s, const monotime_t now);
 
 void v2_migrate_children(struct ike_sa *from, struct child_sa *to);
 
@@ -917,7 +920,9 @@ extern bool uniqueIDs;  /* --uniqueids? */
 void suppress_delete_notify(const struct ike_sa *ike,
 			    const char *what, so_serial_t so);
 
-void list_state_events(struct show *s, monotime_t now);
+void list_state_events(struct show *s, const monotime_t now);
+struct child_sa *find_v2_child_sa_by_spi(ipsec_spi_t spi, int8_t protoid,
+					 ip_address *dst);
 
 void check_state(struct state *st, where_t where);
 
@@ -957,4 +962,11 @@ struct state_filter {
 bool next_state_new2old(struct state_filter *query);
 bool next_state_old2new(struct state_filter *query);
 
-#endif /* _STATE_H */
+extern void set_sa_expire_next_event(enum event_type next_event, struct state *st);
+
+void jam_humber_max(struct jambuf *buf,
+		    const char *prefix,
+		    uint64_t val,
+		    const char *suffix);
+
+#endif /* STATE_H */

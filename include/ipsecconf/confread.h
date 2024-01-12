@@ -48,7 +48,7 @@ enum keyword_set {
 	k_default = 2
 };
 typedef char *ksf[KEY_STRINGS_ROOF];
-typedef int knf[KEY_NUMERIC_ROOF];
+typedef intmax_t knf[KEY_NUMERIC_ROOF];
 typedef enum keyword_set str_set[KEY_STRINGS_ROOF];
 typedef enum keyword_set int_set[KEY_NUMERIC_ROOF];
 
@@ -74,8 +74,10 @@ struct starter_end {
 
 	ip_protoport protoport;
 
-	enum keyword_pubkey rsasigkey_type;
-	char *rsasigkey;
+	enum keyword_pubkey pubkey_type;
+	enum ipseckey_algorithm_type pubkey_alg;
+	char *pubkey;
+
 	bool key_from_DNS_on_demand;
 	char *virt;
 	char *certx;

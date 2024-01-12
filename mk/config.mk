@@ -19,7 +19,21 @@
 ifndef config.mk
 config.mk = true
 
-# A Makefile wanting to test variables defined below has two choides:
+#
+# Configuration options.
+#
+# Sometimes the make variable is called USE_<feature> and the C macro
+# is called HAVE_<feature>, but not always.
+#
+# USE_  assume a package and enable corresponding feature
+#
+#       For instance USE_SECCOMP assumes the seccomp library and
+#       enables the seccomp code.
+#
+# HAVE_ variables let you tell Libreswan what system related libraries
+#       you may or maynot have
+
+# A Makefile wanting to test variables defined below has two choices:
 #
 # - include config.mk early and use GNU-make's 'ifeq' statement
 #
@@ -129,8 +143,10 @@ endif
 # Options that really belong in CFLAGS (making for an intuitive way to
 # override them).
 #
-# Unfortunately this file is shared with the kernel which seems to
-# have its own ideas on CFLAGS.
+# AUTOCONF dogma is to put debug and optimization options such as the
+# DEBUG_CFLAGS, WARNING_CFLAGS and OPTIMIZE_CFLAGS below, in CFLAGS
+# making them easy to tweak.  Stuff that shouldn change such as
+# include paths are then put elsewhere (such as USERLAND_CFLAGS).
 #
 
 DEBUG_CFLAGS ?= -g
@@ -153,14 +169,29 @@ USERLAND_CFLAGS += $(OPTIMIZE_CFLAGS)
 USERCOMPILE ?= -fstack-protector-all -fno-strict-aliasing -fPIE -DPIE
 USERLAND_CFLAGS += $(USERCOMPILE)
 
-# Basic linking flags
-USERLINK ?= -Wl,-z,relro,-z,now -pie
-USERLAND_LDFLAGS += -Wl,--as-needed
-USERLAND_LDFLAGS += $(USERLINK) $(ASAN)
+# pick up any generated headers
+USERLAND_INCLUDES += -I$(builddir)
+# pick up libreswan's includes
+USERLAND_INCLUDES += -I$(top_srcdir)/include
 
-# Accumulate values in these fields.
-# is -pthread CFLAG or LDFLAG
-USERLAND_INCLUDES += -I$(srcdir) -I$(builddir) -I$(top_srcdir)/include
+# Basic linking flags
+USERLAND_LDFLAGS += -Wl,--as-needed
+USERLINK ?= -Wl,-z,relro,-z,now -pie
+USERLAND_LDFLAGS += $(USERLINK)
+
+#
+# Enable LTO by default
+#
+# Should only need USERLAND_CFLAGS+=-flto.  Unfortunately this doesn't
+# work on BSD.  Hence the extra knobs to allow developers to play.
+
+USE_LTO ?= false
+LTO_CFLAGS ?= -flto
+LTO_LDFLAGS ?=
+ifeq ($(USE_LTO),true)
+USERLAND_CFLAGS += $(LTO_CFLAGS)
+USERLAND_LDFLAGS += $(LTO_LDFLAGS)
+endif
 
 
 ### install pathnames
@@ -329,38 +360,24 @@ ifeq ($(USE_NSS_IPSEC_PROFILE),true)
 USERLAND_CFLAGS += -DNSS_IPSEC_PROFILE
 endif
 
-# Use a local copy of xfrm.h. This can be needed on older systems
-# that do not ship linux/xfrm.h, or when the shipped version is too
-# old. Since we ship some not-yet merged ipsec-next offload code, this
-# is currently true for basically all distro's
-USE_XFRM_HEADER_COPY ?= true
-XFRM_LIFETIME_DEFAULT ?= 30
-USERLAND_CFLAGS += -DXFRM_LIFETIME_DEFAULT=$(XFRM_LIFETIME_DEFAULT)
-
-USE_XFRM_INTERFACE_IFLA_HEADER ?= false
-
-# Some systems have a bogus combination of glibc and kernel-headers which
-# causes a conflict in the IPv6 defines. Try enabling this option as a workaround
-# when you see errors related to 'struct in6_addr'
-USE_GLIBC_KERN_FLIP_HEADERS ?= false
-
 # When compiling on a system where unbound is missing the required unbound-event.h
 # include file, enable this workaround option that will enable an included copy of
 # this file as shipped with libreswan. The copy is taken from unbound 1.6.0.
 USE_UNBOUND_EVENT_H_COPY ?= false
 
+# -levent can mean two things?
+LIBEVENT_LDFLAGS ?= -levent_core -levent_pthreads
+
 # Install the portexclude service for policies/portexcludes.conf policies
 # Disabled per default for now because it requires python[23]
 USE_PORTEXCLUDES ?= false
-
-# The default DNSSEC root key location is set to /var/lib/unbound/root.key
-# DEFAULT_DNSSEC_ROOTKEY_FILE=/var/lib/unbound/root.key
 
 # Enable AddressSanitizer - see https://libreswan.org/wiki/Compiling_with_AddressSanitizer
 # requires clang or gcc >= 4.8 and libasan. Do not combine with Electric Fence and do not
 # run pluto with --leak-detective
 # ASAN = -fsanitize=address
 ASAN ?=
+USERLAND_LDFLAGS += $(ASAN)
 
 ### misc configuration, included here in hopes that other files will not
 ### have to be changed for common customizations.
@@ -371,22 +388,12 @@ ASAN ?=
 # look for POD2MAN command
 POD2MAN ?= $(shell which pod2man | grep / | head -n1)
 
-## build environment variations
-#
-# USE_ variables determine if features are compiled into Libreswan.
-#       these let you turn on/off specific features
-# HAVE_ variables let you tell Libreswan what system related libraries
-#       you may or maynot have
-
 # Enable or disable support for IKEv1. When disabled, the ike-policy= value
 # will be ignored and all IKEv1 packets will be dropped.
 USE_IKEv1 ?= true
 ifeq ($(USE_IKEv1),true)
 USERLAND_CFLAGS += -DUSE_IKEv1
 endif
-
-# Enable support for DNSSEC. This requires the unbound and ldns libraries.
-USE_DNSSEC ?= true
 
 # For systemd start/stop notifications and watchdog feature
 # We only enable this by default if used INITSYSTEM is systemd
@@ -528,6 +535,8 @@ TRANSFORM_VARIABLES = sed \
 			-e "s:@SD_WATCHDOGSEC@:$(SD_WATCHDOGSEC):g" \
 			-e "s:@SHELL_BINARY@:$(SHELL_BINARY):g" \
 			-e "s:@USE_DEFAULT_CONNS@:$(USE_DEFAULT_CONNS):g" \
+			-e "s:@HAVE_IPTABLES@:$(HAVE_IPTABLES):g" \
+			-e "s:@HAVE_NFTABLES@:$(HAVE_NFTABLES):g" \
 			$(NULL)
 
 # For KVM testing setup
@@ -550,13 +559,6 @@ USERLAND_LDFLAGS += -lefence
 endif
 
 #
-# Configuration options.
-#
-# Sometimes the make variable is called USE_<feature> and the C macro
-# is called HAVE_<feature>, but not always.
-#
-
-#
 # Kernel support
 #
 # KLIPS is no longer supported
@@ -565,32 +567,53 @@ endif
 
 # support Linux kernel's XFRM (aka NETKEY)
 USE_XFRM ?= false
-# support BSD/KAME kernels (on *BSD and OSX)?
-USE_BSDKAME ?= false
-# support pfkey v2 (probably implemented using KAME derived code)
+# support pfkey v2 interface (typically KAME derived)
 USE_PFKEYV2 ?= false
 
 ifeq ($(USE_XFRM),true)
-USE_XFRM_INTERFACE ?= true
 USERLAND_CFLAGS += -DKERNEL_XFRM
-ifeq ($(USE_XFRM_INTERFACE), true)
-USERLAND_CFLAGS += -DUSE_XFRM_INTERFACE
-endif
-endif
-
-ifeq ($(USE_BSDKAME),true)
-USERLAND_CFLAGS += -DKERNEL_BSDKAME
 endif
 
 ifeq ($(USE_PFKEYV2),true)
 USERLAND_CFLAGS += -DKERNEL_PFKEYV2
 endif
 
+# extra XFRM options
+
+ifeq ($(USE_XFRM),true)
+USE_XFRM_INTERFACE ?= true
+ifeq ($(USE_XFRM_INTERFACE), true)
+USERLAND_CFLAGS += -DUSE_XFRM_INTERFACE
+endif
+endif
+
+# Use a local copy of xfrm.h. This can be needed on older systems
+# that do not ship linux/xfrm.h, or when the shipped version is too
+# old. Since we ship some not-yet merged ipsec-next offload code, this
+# is currently true for basically all distro's
+
+USE_XFRM_HEADER_COPY ?= false
+USE_XFRM_INTERFACE_IFLA_HEADER ?= false
+
+ifeq ($(USE_XFRM),true)
+XFRM_LIFETIME_DEFAULT ?= 30
+USERLAND_CFLAGS += -DXFRM_LIFETIME_DEFAULT=$(XFRM_LIFETIME_DEFAULT)
+endif
+
+# Enable support for DNSSEC. This requires the unbound and ldns
+# libraries.  The default DNSSEC root key location must be set in
+# default/*.mk; look for auto-trust-anchor-file in unbound.conf.
+
+USE_DNSSEC ?= true
+# DEFAULT_DNSSEC_ROOTKEY_FILE=<unspecified>
+
 ifeq ($(USE_DNSSEC),true)
 USERLAND_CFLAGS += -DUSE_DNSSEC
 UNBOUND_LDFLAGS ?= -lunbound -lldns
-DEFAULT_DNSSEC_ROOTKEY_FILE ?= "/var/lib/unbound/root.key"
-USERLAND_CFLAGS += -DDEFAULT_DNSSEC_ROOTKEY_FILE=\"${DEFAULT_DNSSEC_ROOTKEY_FILE}\"
+ifndef DEFAULT_DNSSEC_ROOTKEY_FILE
+$(error DEFAULT_DNSSEC_ROOTKEY_FILE unknown)
+endif
+USERLAND_CFLAGS += -DDEFAULT_DNSSEC_ROOTKEY_FILE=\"$(DEFAULT_DNSSEC_ROOTKEY_FILE)\"
 endif
 
 ifeq ($(USE_FIPSCHECK),true)
@@ -604,7 +627,7 @@ USERLAND_CFLAGS += -DHAVE_LABELED_IPSEC
 endif
 
 ifeq ($(USE_SECCOMP),true)
-USERLAND_CFLAGS += -DHAVE_SECCOMP
+USERLAND_CFLAGS += -DUSE_SECCOMP
 SECCOMP_LDFLAGS = -lseccomp
 endif
 
@@ -720,9 +743,11 @@ ifeq ($(USE_PRF_AES_XCBC),true)
 USERLAND_CFLAGS += -DUSE_PRF_AES_XCBC
 endif
 
-# Use the NSS Key Derivation Function (KDF) instead of using the NSS
-# secure hash functions to build our own PRF. With this enabled,
-# libreswan itself no longer needs to be FIPS validated.
+# Use NSS's FIPS compliant Key Derivation Function (KDF).
+#
+# With this enabled, libreswan itself no longer needs to be FIPS
+# validated.  With this disabled, libreswan will use it's own KDF
+# code.
 #
 # Requires NSS >= 3.52
 # NSS 3.44 - 3.51 can be used if the following NSS upstream commit
@@ -740,7 +765,6 @@ ifdef USE_NSS_PRF
 $(error ERROR: Deprecated USE_NSS_PRF variable set, use USE_NSS_KDF instead)
 endif
 
-# This is required for FIPS, but required a recent nss (see comment above)
 USE_NSS_KDF ?= true
 ifeq ($(USE_NSS_KDF),true)
 USERLAND_CFLAGS += -DUSE_NSS_KDF
@@ -764,6 +788,18 @@ USERLAND_CFLAGS += -DFORCE_PR_ASSERT
 # stick with RETRANSMIT_INTERVAL_DEFAULT as makefile variable name
 ifdef RETRANSMIT_INTERVAL_DEFAULT
 USERLAND_CFLAGS += -DRETRANSMIT_INTERVAL_DEFAULT_MS="$(RETRANSMIT_INTERVAL_DEFAULT)"
+endif
+
+# iptables for CAT, or NFLOG, look, barf, verify
+HAVE_IPTABLES ?= false
+ifeq ($(HAVE_IPTABLES),true)
+USERLAND_CFLAGS += -DHAVE_IPTABLES
+endif
+
+# nft nflog-all(nflog not yet), look, barf, verfiy
+HAVE_NFTABLES ?= false
+ifeq ($(HAVE_NFTABLES),true)
+USERLAND_CFLAGS += -DHAVE_NFTABLES
 endif
 
 ifeq ($(HAVE_BROKEN_POPEN),true)

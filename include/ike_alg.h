@@ -124,8 +124,9 @@ enum ike_alg_key {
 	IKEv1_OAKLEY_ID,
 	IKEv1_ESP_ID,
 	IKEv2_ALG_ID,
+	SADB_ALG_ID,
 };
-#define IKE_ALG_KEY_ROOF (IKEv2_ALG_ID+1)
+#define IKE_ALG_KEY_ROOF (SADB_ALG_ID+1)
 #define IKE_ALG_KEY_FLOOR IKEv1_OAKLEY_ID
 
 /*
@@ -144,6 +145,8 @@ const char *ike_alg_key_name(enum ike_alg_key key);
  */
 const struct ike_alg *ike_alg_byname(const struct ike_alg_type *type,
 				     shunk_t name);
+const struct ike_alg *ike_alg_by_key_id(const struct ike_alg_type *type,
+					enum ike_alg_key key, unsigned id);
 int ike_alg_enum_match(const struct ike_alg_type *type, enum ike_alg_key key,
 		       shunk_t name);
 
@@ -297,17 +300,20 @@ struct ike_alg {
 	 * -1 indicates not valid (annoyingly 0 is used by IKEv2 for
 	 * NULL integrity).
 	 */
-	const struct ike_alg_type *algo_type;
 #define ikev1_oakley_id id[IKEv1_OAKLEY_ID]
 #define ikev1_esp_id id[IKEv1_ESP_ID]
 #define ikev2_alg_id id[IKEv2_ALG_ID]
 	int id[IKE_ALG_KEY_ROOF];
+	const struct ike_alg_type *algo_type;
 
 	/*
 	 * Is this algorithm FIPS approved (i.e., can be enabled in
 	 * FIPS mode)?
 	 */
-	const bool fips;
+	struct {
+		const bool approved;
+		uintmax_t operation_limit;
+	} fips;
 };
 
 /*
@@ -432,7 +438,7 @@ struct encrypt_desc {
 	 * K_SADB[_X]_EALG_... but the code is broken - it doesn't
 	 * accommodate missing algorithms.  Hence it is not used here.
 	 */
-	unsigned encrypt_sadb_ealg_id;
+#define encrypt_sadb_ealg_id common.id[SADB_ALG_ID]
 
 	/*
 	 * This encryption algorithm's NETLINK_XFRM name, if known.
@@ -647,7 +653,7 @@ struct integ_desc {
 	 * code is broken - it doesn't accommodate missing algorithms.
 	 * Hence it is not used here.
 	 */
-	unsigned integ_sadb_aalg_id;
+#define integ_sadb_aalg_id common.id[SADB_ALG_ID]
 
 	/*
 	 * This integrity algorithm's NETLINK_XFRM name if known.
@@ -690,7 +696,7 @@ struct integ_desc {
 struct dh_desc {
 	struct ike_alg common;		/* must be first */
 	uint16_t group;
-	size_t bytes;
+	size_t bytes;			/* raw bytes to be put on wire */
 
 	/*
 	 * For MODP groups, the base and prime used when generating
@@ -703,6 +709,15 @@ struct dh_desc {
 	 * For ECP groups, the NSS ASN.1 OID that identifies the ECP.
 	 */
 	SECOidTag nss_oid;
+	/*
+	 * For most EC algorithms, NSS's public key value consists of
+	 * the one byte EC_POINT_FORM_UNCOMPRESSED prefix followed by
+	 * two equal-sized points.
+	 *
+	 * There's one exception (curve25519) which contains no prefix
+	 * and just a single point.
+	 */
+	bool nss_adds_ec_point_form_uncompressed;
 
 	const struct dh_ops *dh_ops;
 };
@@ -722,12 +737,13 @@ struct ipcomp_desc {
 		 * NULL implies not supported.
 		 */
 		const char *xfrm_name;
-		/*
-		 * The algorithms's SADB (pfkeyv2) value (>0 when defined for
-		 * this OS).
-		 */
-		unsigned sadb_calg_id;
 	} kernel;
+
+	/*
+	 * The algorithms's SADB (pfkeyv2) value (>0 when defined for
+	 * this OS).
+	 */
+#define ipcomp_sadb_calg_id common.id[SADB_ALG_ID]
 
 	/*
 	 * Will IKE ever support IPCOMP?
@@ -849,6 +865,6 @@ const struct ipcomp_desc *ikev1_get_kernel_ipcomp_desc(enum ipsec_ipcomp_algo);
 
 const struct encrypt_desc *encrypt_desc_by_sadb_ealg_id(unsigned id);
 const struct integ_desc *integ_desc_by_sadb_aalg_id(unsigned id);
-const struct ipcomp_desc *ipcomp_desc_by_sadb_aalg_id(unsigned id);
+const struct ipcomp_desc *ipcomp_desc_by_sadb_calg_id(unsigned id);
 
 #endif /* _IKE_ALG_H */

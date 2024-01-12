@@ -36,7 +36,7 @@ west #
 000 "westnet-eastnet-6in4":   our auth:rsasig(RSASIG+RSASIG_v1_5), their auth:RSASIG+ECDSA+RSASIG_v1_5, our autheap:none, their autheap:none;
 000 "westnet-eastnet-6in4":   modecfg info: us:none, them:none, modecfg policy:push, dns:unset, domains:unset, cat:unset;
 000 "westnet-eastnet-6in4":   sec_label:unset;
-000 "westnet-eastnet-6in4":   ike_life: 28800s; ipsec_life: 28800s; replay_window: 128; rekey_margin: 540s; rekey_fuzz: 100%; keyingtries: 0;
+000 "westnet-eastnet-6in4":   ike_life: 28800s; ipsec_life: 28800s; ipsec_max_bytes: 2^63B; ipsec_max_packets: 2^63; replay_window: 128; rekey_margin: 540s; rekey_fuzz: 100%; keyingtries: 0;
 000 "westnet-eastnet-6in4":   retransmit-interval: 9999ms; retransmit-timeout: 99s; iketcp:no; iketcp-port:4500;
 000 "westnet-eastnet-6in4":   initial-contact:no; cisco-unity:no; fake-strongswan:no; send-vendorid:no; send-no-esp-tfc:no;
 000 "westnet-eastnet-6in4":   policy: IKEv2+RSASIG+ECDSA+RSASIG_v1_5+ENCRYPT+TUNNEL+PFS+IKE_FRAG_ALLOW+ESN_NO+ESN_YES;
@@ -46,7 +46,7 @@ west #
 000 "westnet-eastnet-6in4":   our idtype: ID_FQDN; our id=@west; their idtype: ID_FQDN; their id=@east
 000 "westnet-eastnet-6in4":   liveness: passive; dpdaction:hold; dpddelay:0s; retransmit-timeout:60s
 000 "westnet-eastnet-6in4":   nat-traversal: encaps:auto; keepalive:20s
-000 "westnet-eastnet-6in4":   newest ISAKMP SA: #0; newest IPsec SA: #0; conn serial: $1;
+000 "westnet-eastnet-6in4":   newest IKE SA: #0; newest IPsec SA: #0; conn serial: $1;
 west #
  ipsec whack --impair suppress-retransmits
 west #
@@ -55,9 +55,9 @@ initdone
 west #
  ipsec auto --up westnet-eastnet-6in4
 1v2 "westnet-eastnet-6in4" #1: initiating IKEv2 connection
-1v2 "westnet-eastnet-6in4" #1: sent IKE_SA_INIT request
+1v2 "westnet-eastnet-6in4" #1: sent IKE_SA_INIT request to 192.1.2.23:500
 1v2 "westnet-eastnet-6in4" #1: sent IKE_AUTH request {cipher=AES_GCM_16_256 integ=n/a prf=HMAC_SHA2_512 group=MODP2048}
-003 "westnet-eastnet-6in4" #1: initiator established IKE SA; authenticated using RSASSA-PSS with SHA2_512 and preloaded certificate '@east'
+003 "westnet-eastnet-6in4" #1: initiator established IKE SA; authenticated peer '2nnn-bit RSASSA-PSS with SHA2_512' digital signature using preloaded certificate '@east'
 004 "westnet-eastnet-6in4" #2: initiator established Child SA using #1; IPsec tunnel [2001:db8:0:1::-2001:db8:0:1:ffff:ffff:ffff:ffff:0-65535 0] -> [2001:db8:0:2::-2001:db8:0:2:ffff:ffff:ffff:ffff:0-65535 0] {ESP/ESN=>0xESPESP <0xESPESP xfrm=AES_GCM_16_256-NONE DPD=passive}
 west #
  ping6 -n -q -c 4 -I 2001:db8:0:1::254 2001:db8:0:2::254
@@ -70,7 +70,7 @@ west #
 done
 west #
  ipsec whack --trafficstatus
-006 #2: "westnet-eastnet-6in4", type=ESP, add_time=1234567890, inBytes=416, outBytes=416, id='@east'
+006 #2: "westnet-eastnet-6in4", type=ESP, add_time=1234567890, inBytes=416, outBytes=416, maxBytes=2^63B, id='@east'
 west #
  ip xfrm state
 src 192.1.2.23 dst 192.1.2.45
@@ -103,6 +103,18 @@ src 2001:db8:0:2::/64 dst 2001:db8:0:1::/64
 	dir in priority PRIORITY ptype main 
 	tmpl src 192.1.2.23 dst 192.1.2.45
 		proto esp reqid REQID mode tunnel
+src ::/0 dst ::/0 
+	socket out priority 0 ptype main 
+src ::/0 dst ::/0 
+	socket in priority 0 ptype main 
+src ::/0 dst ::/0 
+	socket out priority 0 ptype main 
+src ::/0 dst ::/0 
+	socket in priority 0 ptype main 
+src ::/0 dst ::/0 
+	socket out priority 0 ptype main 
+src ::/0 dst ::/0 
+	socket in priority 0 ptype main 
 src ::/0 dst ::/0 
 	socket out priority 0 ptype main 
 src ::/0 dst ::/0 

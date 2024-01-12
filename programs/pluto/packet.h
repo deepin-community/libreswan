@@ -192,7 +192,7 @@ extern const pb_stream empty_pbs;
  * For an input PBS:
  *	pbs_offset is amount of stream processed.
  *	pbs_room is size of stream.
- *	pbs_left is amount of stream remaining
+ *	pbs_in_remaining is amount of stream remaining
  *
  * For an output PBS:
  *	pbs_offset is current size of stream.
@@ -205,6 +205,7 @@ extern const pb_stream empty_pbs;
 #define pbs_offset(pbs) ((size_t)((pbs)->cur - (pbs)->start))
 #define pbs_room(pbs) ((size_t)((pbs)->roof - (pbs)->start))
 #define pbs_left(pbs) ((size_t)((pbs)->roof - (pbs)->cur))
+#define pbs_in_remaining(pbs) pbs_left(pbs)
 
 #define DBG_dump_pbs(pbs) DBG_dump((pbs)->name, (pbs)->start, pbs_offset(pbs))
 
@@ -244,6 +245,11 @@ diag_t pbs_in_raw(struct pbs_in *pbs, void *bytes, size_t len,
 
 /*
  * Output PBS
+ *
+ * + struct pbs_out contains an embedded logger
+ *
+ * + should the function fail then an internal error is logged and
+ * false returned (they really shouldn't fail).
  */
 
 #define pbs_out packet_byte_stream /* outs */
@@ -265,9 +271,9 @@ extern void close_output_pbs(struct pbs_out *pbs);
 extern shunk_t same_pbs_out_as_shunk(pb_stream *pbs);
 extern chunk_t clone_pbs_out_as_chunk(pb_stream *pbs, const char *name);
 
-diag_t pbs_out_struct(struct pbs_out *outs, struct_desc *sd,
-		      const void *struct_ptr, size_t struct_size,
-		      struct pbs_out *obj_pbs) MUST_USE_RESULT;
+bool pbs_out_struct(struct pbs_out *outs, struct_desc *sd,
+		    const void *struct_ptr, size_t struct_size,
+		    struct pbs_out *obj_pbs) MUST_USE_RESULT;
 
 bool out_struct(const void *struct_ptr, struct_desc *sd,
 		struct pbs_out *outs, struct pbs_out *obj_pbs) MUST_USE_RESULT;
@@ -280,25 +286,15 @@ extern bool ikev1_out_generic_raw(struct_desc *sd,
 #define ikev1_out_generic_chunk(sd, outs, ch, name) \
 	ikev1_out_generic_raw((sd), (outs), (ch).ptr, (ch).len, (name))
 
-diag_t pbs_out_zero(struct pbs_out *outs, size_t len,
-		    const char *name) MUST_USE_RESULT;
+bool pbs_out_zero(struct pbs_out *outs, size_t len, const char *name) MUST_USE_RESULT;
 
-diag_t pbs_out_repeated_byte(struct pbs_out *pbs, uint8_t, size_t len,
-			     const char *name) MUST_USE_RESULT;
+bool pbs_out_repeated_byte(struct pbs_out *pbs, uint8_t byte, size_t len,
+			   const char *name) MUST_USE_RESULT;
 
-diag_t pbs_out_raw(struct pbs_out *outs, const void *bytes, size_t len,
-		   const char *name) MUST_USE_RESULT;
+bool pbs_out_raw(struct pbs_out *outs, const void *bytes, size_t len,
+		 const char *name) MUST_USE_RESULT;
 
-#define out_hunk(HUNK, OUTS, NAME)					\
-	({								\
-		typeof(HUNK) hunk_ = HUNK; /* evaluate once */		\
-		struct pbs_out *outs_ = OUTS;				\
-		diag_t d_ = pbs_out_raw(outs_, hunk_.ptr, hunk_.len, (NAME)); \
-		if (d_ != NULL) {					\
-			llog_diag(RC_LOG_SERIOUS, outs_->outs_logger, &d_, "%s", ""); \
-		}							\
-		d_ == NULL;						\
-	})
+#define out_hunk(HUNK, OUTS, NAME) pbs_out_hunk(OUTS, HUNK, NAME)
 
 #define pbs_out_hunk(OUTS, HUNK, NAME)					\
 	({								\
@@ -306,6 +302,7 @@ diag_t pbs_out_raw(struct pbs_out *outs, const void *bytes, size_t len,
 		struct pbs_out *outs_ = OUTS;				\
 		pbs_out_raw(outs_, hunk_.ptr, hunk_.len, (NAME));	\
 	})
+
 
 /* ISAKMP Header: for all messages
  * layout from RFC 2408 "ISAKMP" section 3.1
@@ -1247,8 +1244,8 @@ extern uint8_t reply_buffer[MAX_OUTPUT_UDP_SIZE];
 diag_t pbs_in_address(struct pbs_in *input_pbs,
 		      ip_address *address, const struct ip_info *af,
 		      const char *WHAT) MUST_USE_RESULT;
-diag_t pbs_out_address(struct pbs_out *output_pbs, const ip_address address,
-		       const char *what) MUST_USE_RESULT;
+bool pbs_out_address(struct pbs_out *output_pbs, const ip_address address,
+		     const char *what) MUST_USE_RESULT;
 
 int pbs_peek_byte(const struct pbs_in *ins);
 

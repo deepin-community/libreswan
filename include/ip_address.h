@@ -26,6 +26,9 @@
 #include "where.h"
 #include "ip_bytes.h"
 
+struct in_addr;
+struct in6_addr;
+
 struct jambuf;
 struct ip_info;
 
@@ -57,11 +60,11 @@ typedef struct {
 	struct ip_bytes bytes;
 } ip_address;
 
-#define PRI_ADDRESS "<address-%s:IPv%d["PRI_BYTES"]>"
+#define PRI_ADDRESS "<address-%s:IPv%d["PRI_IP_BYTES"]>"
 #define pri_address(A)					\
 		((A)->is_set ? "set" : "unset"),	\
 		(A)->version,				\
-		pri_bytes((A)->bytes)
+		pri_ip_bytes((A)->bytes)
 
 void pexpect_address(const ip_address *a, where_t where);
 #define paddress(A) pexpect_address(A, HERE)
@@ -149,6 +152,8 @@ extern const ip_address unset_address;
 
 bool address_is_unset(const ip_address *address);		/* handles NULL */
 const struct ip_info *address_type(const ip_address *address);	/* handles NULL */
+
+const struct ip_info *address_info(const ip_address address);
 
 bool address_is_specified(const ip_address address);
 

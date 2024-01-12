@@ -7,7 +7,7 @@ Uploaders:
  Ondřej Surý <ondrej@debian.org>,
 Vcs-Browser: https://salsa.debian.org/debian/libreswan
 Vcs-Git: https://salsa.debian.org/debian/libreswan.git
-Standards-Version: 4.6.1
+Standards-Version: 4.6.2
 Rules-Requires-Root: no
 Build-Depends:
  bison,
@@ -17,7 +17,7 @@ Build-Depends:
  htmldoc,
  libaudit-dev [linux-any],
  libcap-ng-dev [linux-any],
- libcurl4-nss-dev,
+ libcurl4-gnutls-dev,
  libevent-dev,
  libkrb5-dev,
  libldap2-dev,

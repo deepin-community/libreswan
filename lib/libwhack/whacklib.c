@@ -28,8 +28,6 @@
 #include <arpa/inet.h>
 #include <getopt.h>
 #include <assert.h>
-
-#include <libreswan.h>
 #include <stdarg.h>
 
 #include "sysdep.h"
@@ -316,7 +314,7 @@ static bool pickle_whack_end(struct whackpacker *wp,
 	return (PICKLE_CONSTANT_STRING(&end->leftright, leftright),
 		PICKLE_STRING(&end->id) &&
 		PICKLE_STRING(&end->cert) &&
-		PICKLE_STRING(&end->rsasigkey) &&
+		PICKLE_STRING(&end->pubkey) &&
 		PICKLE_STRING(&end->ckaid) &&
 		PICKLE_STRING(&end->ca) &&
 		PICKLE_STRING(&end->groups) &&

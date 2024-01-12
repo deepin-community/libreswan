@@ -18,6 +18,7 @@
  * Copyright (C) 2015-2020 Paul Wouters <pwouters@redhat.com>
  * Copyright (C) 2016-2020 Andrew Cagney <cagney@gnu.org>
  * Copyright (C) 2017 Mayank Totale <mtotale@gmail.com>
+ * Copyright (C) 20212-2022 Paul Wouters <paul.wouters@aiven.io>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -95,6 +96,7 @@
 #include "orient.h"
 #include "ikev2_proposals.h"
 #include "lswnss.h"
+#include "show.h"
 
 #define MINIMUM_IPSEC_SA_RANDOM_MARK 65536
 static uint32_t global_marks = MINIMUM_IPSEC_SA_RANDOM_MARK;
@@ -114,7 +116,6 @@ static void hash_connection(struct connection *c)
 
 struct connection *conn_by_name(const char *nm, bool no_inst)
 {
-	dbg("FOR_EACH_CONNECTION_... in %s", __func__);
 	struct connection_filter cq = {
 		.name = nm,
 		.where = HERE,
@@ -142,7 +143,7 @@ void release_connection(struct connection *c)
 static void delete_end(struct end *e)
 {
 	free_chunk_content(&e->sec_label);
-	virtual_ip_delref(&e->virt, HERE);
+	virtual_ip_delref(&e->virt);
 }
 
 static void delete_spd_route(struct spd_route **sr, bool first, bool valid)
@@ -201,8 +202,7 @@ static void discard_connection(struct connection **cp, bool connection_valid)
 	if (c->kind == CK_GROUP)
 		delete_group(c);
 
-	if (c->pool != NULL)
-		unreference_addresspool(c);
+	addresspool_delref(&c->pool);
 
 	if (IS_XFRMI && c->xfrmi != NULL)
 		unreference_xfrmi(c);
@@ -757,7 +757,7 @@ static char *format_connection(char *buf, size_t buf_len,
 /* spd_route's with end's get copied in xauth.c */
 void unshare_connection_end(struct connection *c, struct end *e)
 {
-	e->virt = virtual_ip_addref(e->virt, HERE);
+	e->virt = virtual_ip_addref(e->virt);
 	pexpect(e->sec_label.ptr == NULL);
 	e->host = &c->end[e->config->index].host;
 }
@@ -798,8 +798,7 @@ static void unshare_connection(struct connection *c, struct connection *t/*empla
 		end->host.id = clone_id(&end->host.id, "unshare connection id");
 	}
 
-	if (c->pool !=  NULL)
-		reference_addresspool(c);
+	c->pool = addresspool_addref(t->pool);
 
 	if (IS_XFRMI && c->xfrmi != NULL)
 		reference_xfrmi(c);
@@ -867,13 +866,14 @@ static int extract_end(struct connection *c,
 		       const struct ip_info *client_afi,
 		       struct logger *logger/*connection "..."*/)
 {
+	err_t err;
 	passert(dst->config == config_end);
 	const char *leftright = dst->config->leftright;
 	bool same_ca = false;
 
 	/* XXX: still nasty; just less low-level */
 	if (range_size(src->pool_range) > 0) {
-		struct ip_pool *pool; /* ignore */
+		struct addresspool *pool; /* ignore */
 		diag_t d = find_addresspool(src->pool_range, &pool);
 		if (d != NULL) {
 			llog_diag(RC_FATAL, logger, &d, "failed to add connection: ");
@@ -941,11 +941,14 @@ static int extract_end(struct connection *c,
 				    leftright, src->cert,
 				    leftright, src->cert);
 		}
-		if (src->rsasigkey != NULL) {
+		if (src->pubkey != NULL) {
+			enum_buf pkb;
 			llog(RC_LOG, logger,
-				    "warning: ignoring %s rsasigkey '%s' and using %s certificate '%s'",
-				    leftright, src->cert,
-				    leftright, src->cert);
+			     "warning: ignoring %s %s '%s' and using %s certificate '%s'",
+			     leftright,
+			     str_enum(&ipseckey_algorithm_config_names, src->pubkey_alg, &pkb),
+			     src->pubkey,
+			     leftright, src->cert);
 		}
 		CERTCertificate *cert = get_cert_by_nickname_from_nss(src->cert, logger);
 		if (cert == NULL) {
@@ -963,55 +966,102 @@ static int extract_end(struct connection *c,
 			CERT_DestroyCertificate(cert);
 			return -1;
 		}
-	} else if (src->rsasigkey != NULL) {
-		if (src->ckaid != NULL) {
-			llog(RC_LOG, logger,
-				    "warning: ignoring %s ckaid '%s' and using %s rsasigkey",
-				    leftright, src->ckaid, leftright);
-		}
+	} else if (src->pubkey != NULL) {
+
 		/*
-		 * XXX: hack: whack will load the rsasigkey in a
+		 * XXX: hack: whack will load the actual key in a
 		 * second message, this code just extracts the ckaid.
 		 */
-		const struct pubkey_type *type = &pubkey_type_rsa;
-		/* XXX: lifted from starter_whack_add_pubkey() */
-		char err_buf[TTODATAV_BUF];
-		char keyspace[1024 + 4];
-		size_t keylen;
 
-		/* ??? this value of err isn't used */
-		err_t err = ttodatav(src->rsasigkey, 0, 0,
-				     keyspace, sizeof(keyspace), &keylen,
-				     err_buf, sizeof(err_buf), 0);
-		union pubkey_content pkc;
-		keyid_t pubkey;
-		ckaid_t ckaid;
-		size_t size;
-		err = type->unpack_pubkey_content(&pkc, &pubkey, &ckaid, &size,
-						  chunk2(keyspace, keylen));
-		if (err != NULL) {
-			llog(RC_FATAL, logger,
-				    "failed to add connection: %s raw public key invalid: %s",
-				    leftright, err);
-			return -1;
+		if (src->ckaid != NULL) {
+			enum_buf pkb;
+			llog(RC_LOG, logger,
+			     "warning: ignoring %sckaid=%s and using %s%s",
+			     leftright, src->ckaid,
+			     leftright, str_enum(&ipseckey_algorithm_config_names, src->pubkey_alg, &pkb));
 		}
+
+		chunk_t keyspace = NULL_HUNK; /* must free */
+		struct pubkey_content pkc;
+		if (src->pubkey_alg == IPSECKEY_ALGORITHM_X_PUBKEY) {
+			/* XXX: lifted from starter_whack_add_pubkey() */
+			err = ttochunk(shunk1(src->pubkey), 64/*damit*/, &keyspace);
+			if (err != NULL) {
+				enum_buf pkb;
+				llog(RC_FATAL, logger,
+				     "failed to add connection: %s%s invalid: %s",
+				     leftright, str_enum(&ipseckey_algorithm_config_names, src->pubkey_alg, &pkb),
+				     err);
+				return -1;
+			}
+			diag_t d = pubkey_der_to_pubkey_content(HUNK_AS_SHUNK(keyspace), &pkc);
+			if (d != NULL) {
+				free_chunk_content(&keyspace);
+				enum_buf pkb;
+				llog_diag(RC_FATAL, logger, &d,
+					  "failed to add connection: %s%s invalid",
+					  leftright, str_enum(&ipseckey_algorithm_config_names, src->pubkey_alg, &pkb));
+				return -1;
+			}
+		} else {
+			/* XXX: lifted from starter_whack_add_pubkey() */
+			err = ttochunk(shunk1(src->pubkey), 0/*figure-it-out*/, &keyspace);
+			if (err != NULL) {
+				enum_buf pkb;
+				llog(RC_FATAL, logger,
+				     "failed to add connection: %s%s invalid: %s",
+				     leftright, str_enum(&ipseckey_algorithm_config_names, src->pubkey_alg, &pkb),
+				     err);
+				return -1;
+			}
+			const struct pubkey_type *type;
+			switch (src->pubkey_alg) {
+			case IPSECKEY_ALGORITHM_RSA:
+				type = &pubkey_type_rsa;
+				break;
+			case IPSECKEY_ALGORITHM_ECDSA:
+				type = &pubkey_type_ecdsa;
+				break;
+			default:
+				bad_case(src->pubkey_alg);
+			}
+
+			diag_t d = type->ipseckey_rdata_to_pubkey_content(HUNK_AS_SHUNK(keyspace), &pkc);
+			if (d != NULL) {
+				free_chunk_content(&keyspace);
+				enum_buf pkb;
+				llog_diag(RC_FATAL, logger, &d,
+					  "failed to add connection: %s%s invalid",
+					  leftright, str_enum(&ipseckey_algorithm_config_names, src->pubkey_alg, &pkb));
+				return -1;
+			}
+		}
+
+		passert(pkc.type != NULL);
+
 		ckaid_buf ckb;
-		dbg("saving %s CKAID %s extracted from raw %s public key",
-		    leftright, str_ckaid(&ckaid, &ckb), type->name);
-		config_end->host.ckaid = clone_const_thing(ckaid, "raw pubkey's ckaid");
-		type->free_pubkey_content(&pkc);
+		enum_buf pkb;
+		dbg("saving CKAID %s extracted from %s%s",
+		    str_ckaid(&pkc.ckaid, &ckb),
+		    leftright, str_enum(&ipseckey_algorithm_config_names, src->pubkey_alg, &pkb));
+		config_end->host.ckaid = clone_const_thing(pkc.ckaid, "raw pubkey's ckaid");
+		free_chunk_content(&keyspace);
+		pkc.type->free_pubkey_content(&pkc);
+
 		/* try to pre-load the private key */
 		bool load_needed;
-		err = preload_private_key_by_ckaid(&ckaid, &load_needed, logger);
+		err = preload_private_key_by_ckaid(config_end->host.ckaid, &load_needed, logger);
 		if (err != NULL) {
 			ckaid_buf ckb;
 			dbg("no private key matching %s CKAID %s: %s",
 			    leftright, str_ckaid(config_end->host.ckaid, &ckb), err);
 		} else if (load_needed) {
 			ckaid_buf ckb;
+			enum_buf pkb;
 			llog(RC_LOG|LOG_STREAM/*not-whack-for-now*/, logger,
-				    "loaded private key matching %s CKAID %s",
-				    leftright, str_ckaid(config_end->host.ckaid, &ckb));
+			     "loaded private key matching %s%s CKAID %s",
+			     leftright, str_enum(&ipseckey_algorithm_config_names, src->pubkey_alg, &pkb),
+			     str_ckaid(config_end->host.ckaid, &ckb));
 		}
 	} else if (src->ckaid != NULL) {
 		ckaid_t ckaid;
@@ -1324,7 +1374,7 @@ static int extract_end(struct connection *c,
 			llog(RC_LOG_SERIOUS, logger, "both left and right define address pools");
 			return -1;
 		}
-		diag_t d = install_addresspool(src->pool_range, &c->pool);
+		diag_t d = install_addresspool(src->pool_range, c);
 		if (d != NULL) {
 			llog_diag(RC_LOG_SERIOUS, c->logger, &d,
 				 "invalid %saddresspool: ", leftright);
@@ -1839,6 +1889,12 @@ static bool extract_connection(const struct whack_message *wm,
 		     "kernel interface does not support ESN so disabling");
 		c->policy &= ~POLICY_ESN_YES;
 		c->policy |= POLICY_ESN_NO;
+	} else if (wm->sa_replay_window > kernel_ops->max_replay_window) {
+		llog(RC_FATAL, c->logger,
+		     "failed to add connection: replay-window=%ju exceeds %s limit of %ju",
+		     wm->sa_replay_window,
+		     kernel_ops->interface_name, kernel_ops->max_replay_window);
+		return false;
 	}
 
 	connection_buf cb;
@@ -1896,7 +1952,7 @@ static bool extract_connection(const struct whack_message *wm,
 							       c->logger);
 			llog_v2_proposals(LOG_STREAM/*not-whack*/|RC_LOG, c->logger,
 					  config->v2_ike_proposals,
-					  "IKE SA proposals");
+					  "IKE SA proposals (connection add)");
 		}
 	}
 
@@ -1982,7 +2038,7 @@ static bool extract_connection(const struct whack_message *wm,
 						       c->logger);
 			llog_v2_proposals(LOG_STREAM/*not-whack*/|RC_LOG, c->logger,
 					  config->v2_ike_auth_child_proposals,
-					  "Child SA proposals");
+					  "Child SA proposals (connection add)");
 		}
 	}
 
@@ -2001,8 +2057,59 @@ static bool extract_connection(const struct whack_message *wm,
 		config->retransmit_timeout = wm->retransmit_timeout;
 		config->retransmit_interval = wm->retransmit_interval;
 
+		{
+			/* http://csrc.nist.gov/publications/nistpubs/800-77/sp800-77.pdf */
+			time_t max_ike_life = libreswan_fipsmode() ? FIPS_IKE_SA_LIFETIME_MAXIMUM : IKE_SA_LIFETIME_MAXIMUM;
+			time_t max_ipsec_life = libreswan_fipsmode() ? FIPS_IPSEC_SA_LIFETIME_MAXIMUM : IPSEC_SA_LIFETIME_MAXIMUM;
+
+			if (deltatime_cmp(c->sa_ike_life_seconds, ==, deltatime_zero) || deltasecs(c->sa_ike_life_seconds) > max_ike_life) {
+				llog(RC_LOG, c->logger,
+				     "IKE lifetime set to the maximum allowed %jds",
+				     (intmax_t) max_ike_life);
+				c->sa_ike_life_seconds = deltatime(max_ike_life);
+			}
+			if (deltatime_cmp(c->sa_ipsec_life_seconds, ==, deltatime_zero) || deltasecs(c->sa_ipsec_life_seconds) > max_ipsec_life) {
+				llog(RC_LOG, c->logger,
+				     "IPsec lifetime set to the maximum allowed %jds",
+				     (intmax_t) max_ipsec_life);
+				c->sa_ipsec_life_seconds = deltatime(max_ipsec_life);
+			}
+		}
+		/*
+		 * A 1500 mtu packet requires 1500/16 ~= 90 crypto
+		 * operations.  Always use NIST maximums for
+		 * bytes/packets.
+		 *
+		 * https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf
+		 * "The total number of invocations of the
+		 * authenticated encryption function shall not exceed
+		 * 2^32 , including all IV lengths and all instances
+		 * of the authenticated encryption function with the
+		 * given key."
+		 *
+		 * Note "invocations" is not "bytes" or "packets", but
+		 * the safest assumption is the most wasteful
+		 * invocations which is 1 byte per packet.
+		 *
+		 * XXX: this code isn't yet doing this.
+		 */
+		config->sa_ipsec_max_bytes = wm->sa_ipsec_max_bytes;
+		if (wm->sa_ipsec_max_bytes > IPSEC_SA_MAX_OPERATIONS) {
+			llog(RC_LOG_SERIOUS, c->logger,
+			     "IPsec max bytes limited to the maximum allowed %s",
+			     IPSEC_SA_MAX_OPERATIONS_STRING);
+			config->sa_ipsec_max_bytes = IPSEC_SA_MAX_OPERATIONS;
+		}
+		config->sa_ipsec_max_packets = wm->sa_ipsec_max_packets;
+		if (wm->sa_ipsec_max_packets > IPSEC_SA_MAX_OPERATIONS) {
+			llog(RC_LOG_SERIOUS, c->logger,
+			     "IPsec max packets limited to the maximum allowed %s",
+			     IPSEC_SA_MAX_OPERATIONS_STRING);
+			config->sa_ipsec_max_packets = IPSEC_SA_MAX_OPERATIONS;
+		}
+
 		if (deltatime_cmp(c->sa_rekey_margin, >=, c->sa_ipsec_life_seconds)) {
-			deltatime_t new_rkm = deltatimescale(1, 2, c->sa_ipsec_life_seconds);
+			deltatime_t new_rkm = deltatime_scale(c->sa_ipsec_life_seconds, 1, 2);
 
 			llog(RC_LOG, c->logger,
 			     "rekeymargin (%jds) >= salifetime (%jds); reducing rekeymargin to %jds seconds",
@@ -2011,25 +2118,6 @@ static bool extract_connection(const struct whack_message *wm,
 			     deltasecs(new_rkm));
 
 			c->sa_rekey_margin = new_rkm;
-		}
-
-		{
-			/* http://csrc.nist.gov/publications/nistpubs/800-77/sp800-77.pdf */
-			time_t max_ike = libreswan_fipsmode() ? FIPS_IKE_SA_LIFETIME_MAXIMUM : IKE_SA_LIFETIME_MAXIMUM;
-			time_t max_ipsec = libreswan_fipsmode() ? FIPS_IPSEC_SA_LIFETIME_MAXIMUM : IPSEC_SA_LIFETIME_MAXIMUM;
-
-			if (deltasecs(c->sa_ike_life_seconds) > max_ike) {
-				llog(RC_LOG_SERIOUS, c->logger,
-				     "IKE lifetime limited to the maximum allowed %jds",
-				     (intmax_t) max_ike);
-				c->sa_ike_life_seconds = deltatime(max_ike);
-			}
-			if (deltasecs(c->sa_ipsec_life_seconds) > max_ipsec) {
-				llog(RC_LOG_SERIOUS, c->logger,
-				     "IPsec lifetime limited to the maximum allowed %jds",
-				     (intmax_t) max_ipsec);
-				c->sa_ipsec_life_seconds = deltatime(max_ipsec);
-			}
 		}
 
 		/* IKEv1's RFC 3706 DPD */
@@ -2373,9 +2461,6 @@ static bool extract_connection(const struct whack_message *wm,
 			wild_side->has_client = true;
 	}
 
-	if (c->pool !=  NULL)
-		reference_addresspool(c);
-
 	/* non configurable */
 	c->ike_window = IKE_V2_OVERLAPPING_WINDOW_SIZE;
 
@@ -2435,14 +2520,16 @@ void add_connection(const struct whack_message *wm, struct logger *logger)
 	/* connection is good-to-go: log against it */
 	llog(RC_LOG, c->logger, "added %s connection", what);
 	policy_buf pb;
-	dbg("ike_life: %jd; ipsec_life: %jds; rekey_margin: %jds; rekey_fuzz: %lu%%; keyingtries: %lu; replay_window: %u; policy: %s",
+	dbg("ike_life: %jd; ipsec_life: %jds; rekey_margin: %jds; rekey_fuzz: %lu%%; keyingtries: %lu; replay_window: %u; policy: %s ipsec_max_bytes: %" PRIu64 " ipsec_max_packets %" PRIu64,
 	    deltasecs(c->sa_ike_life_seconds),
 	    deltasecs(c->sa_ipsec_life_seconds),
 	    deltasecs(c->sa_rekey_margin),
 	    c->sa_rekey_fuzz,
 	    c->sa_keying_tries,
 	    c->sa_replay_window,
-	    str_connection_policies(c, &pb));
+	    str_connection_policies(c, &pb),
+	    c->config->sa_ipsec_max_bytes,
+	    c->config->sa_ipsec_max_packets);
 	char topo[CONN_BUF_LEN];
 	dbg("%s", format_connection(topo, sizeof(topo), c, &c->spd));
 	/* XXX: something better? */
@@ -2496,7 +2583,7 @@ struct connection *add_group_instance(struct connection *group,
 
 	if (t->spd.that.virt != NULL) {
 		DBG_log("virtual_ip not supported in group instance; ignored");
-		virtual_ip_delref(&t->spd.that.virt, HERE);
+		virtual_ip_delref(&t->spd.that.virt);
 	}
 
 	unshare_connection(t, group);
@@ -3769,8 +3856,8 @@ static void show_one_sr(struct show *s,
 	}
 }
 
-void show_one_connection(struct show *s,
-			 const struct connection *c)
+static void show_one_connection(struct show *s,
+				const struct connection *c)
 {
 	const char *ifn;
 	char ifnstr[2 *  IFNAMSIZ + 2];  /* id_rname@id_vname\0 */
@@ -3820,14 +3907,17 @@ void show_one_connection(struct show *s,
 			     str_dn_or_null(ASN1(c->remote->config->host.ca), "%any", &that_ca));
 	}
 
-	show_comment(s, PRI_CONNECTION":   ike_life: %jds; ipsec_life: %jds; replay_window: %u; rekey_margin: %jds; rekey_fuzz: %lu%%; keyingtries: %lu;",
-		     c->name, instance,
-		     deltasecs(c->sa_ike_life_seconds),
-		     deltasecs(c->sa_ipsec_life_seconds),
-		     c->sa_replay_window,
-		     deltasecs(c->sa_rekey_margin),
-		     c->sa_rekey_fuzz,
-		     c->sa_keying_tries);
+	SHOW_JAMBUF(RC_COMMENT, s, buf) {
+		jam(buf, PRI_CONNECTION":  ", c->name, instance);
+		jam(buf, " ike_life: %jds;", deltasecs(c->sa_ike_life_seconds));
+		jam(buf, " ipsec_life: %jds;", deltasecs(c->sa_ipsec_life_seconds));
+		jam_humber_max(buf, " ipsec_max_bytes: ", c->config->sa_ipsec_max_bytes, "B;");
+		jam_humber_max(buf, " ipsec_max_packets: ", c->config->sa_ipsec_max_packets, ";");
+		jam(buf, " replay_window: %u;", c->sa_replay_window);
+		jam(buf, " rekey_margin: %jds;", deltasecs(c->sa_rekey_margin));
+		jam(buf, " rekey_fuzz: %lu%%;", c->sa_rekey_fuzz);
+		jam(buf, " keyingtries: %lu;", c->sa_keying_tries);
+	}
 
 	show_comment(s, PRI_CONNECTION":   retransmit-interval: %jdms; retransmit-timeout: %jds; iketcp:%s; iketcp-port:%d;",
 		     c->name, instance,
@@ -3990,10 +4080,11 @@ void show_one_connection(struct show *s,
 	}
 
 	SHOW_JAMBUF(RC_COMMENT, s, buf) {
-		jam(buf, PRI_CONNECTION":   newest ISAKMP SA: #%lu; newest IPsec SA: #%lu; conn serial: "PRI_CO"",
+		jam(buf, PRI_CONNECTION":   newest %s: #%lu; newest IPsec SA: #%lu; conn serial: "PRI_CO"",
 		    c->name, instance,
+		    c->config->ike_info->sa_type_name[IKE_SA],
 		    c->newest_ike_sa,
-		    c->newest_ipsec_sa,
+		    c->newest_ipsec_sa, /* IPsec SA or Child SA? */
 		    pri_co(c->serialno));
 		if (c->serial_from != UNSET_CO_SERIAL) {
 			jam(buf, ", instantiated from: "PRI_CO";",

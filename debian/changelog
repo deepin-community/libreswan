@@ -1,8 +1,66 @@
-libreswan (4.7-1) UNRELEASED; urgency=medium
+libreswan (4.12.1-1deepin2) unstable; urgency=medium
 
-  * update
+  * Add patch for deepin build
 
- -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Wed, 22 Jun 2022 03:03:41 -0400
+ -- xiangzelong <xiangzelong@deepin.org>  Fri, 12 Jan 2024 11:21:57 +0800
+
+libreswan (4.12-1) unstable; urgency=medium
+
+  * New upstream version
+   - fixes CVE-2023-38710
+   - fixes CVE-2023-38711
+   - fixes CVE-2023-38712
+  * Move from libcurl4-nss to libcurl4-gnutls (Closes: #1038912)
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Thu, 10 Aug 2023 11:15:45 -0400
+
+libreswan (4.11-1) unstable; urgency=medium
+
+  * New upstream version
+    - fixes CVE-2023-30570 (Closes: #1035542)
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Fri, 02 Jun 2023 17:53:00 -0400
+
+libreswan (4.10-2) unstable; urgency=medium
+
+  * Reach NSPR mipsel workaround for #854472
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Fri, 10 Mar 2023 16:34:25 -0500
+
+libreswan (4.10-1) unstable; urgency=medium
+
+  * new upstream version
+    - fixes CVE-2023-23009 (Closes: #1031821)
+    - fixes some IKEv1 overdeletion
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Fri, 03 Mar 2023 10:04:35 -0500
+
+libreswan (4.9-2) unstable; urgency=medium
+
+  * Fix CVE-2023-23009
+    (this is an attempted fix, upstream has not confirmed it yet
+    at https://github.com/libreswan/libreswan/issues/954)
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Wed, 22 Feb 2023 15:13:07 -0500
+
+libreswan (4.9-1) unstable; urgency=medium
+
+  [ Daniel Kahn Gillmor ]
+  * New upstream release
+    - upstream fixed LTO (Closes: #1015517)
+  * d/upstream/signing-key.asc: update with better bindings
+  * Standards-Version: bump to 4.6.2 (no changes needed)
+
+  [ Vagrant Cascadian ]
+  * debian/rules: Pass OBJDIR to avoid embedding hostname. (Closes: #1020736)
+
+  [ Daniel Kahn Gillmor ]
+  * refresh patches
+  * d/copyright: remove reference to upstream-deleted BSDKAME code
+  * update lintian overrides
+  * d/copyright: update years to relevant years
+
+ -- Daniel Kahn Gillmor <dkg@fifthhorseman.net>  Thu, 19 Jan 2023 17:41:25 -0500
 
 libreswan (4.7-1) unstable; urgency=medium
 

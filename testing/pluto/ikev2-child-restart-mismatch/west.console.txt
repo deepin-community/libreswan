@@ -33,9 +33,9 @@ initdone
 west #
  ipsec auto --up westnet-eastnet-ikev2a
 1v2 "westnet-eastnet-ikev2a" #1: initiating IKEv2 connection
-1v2 "westnet-eastnet-ikev2a" #1: sent IKE_SA_INIT request
+1v2 "westnet-eastnet-ikev2a" #1: sent IKE_SA_INIT request to 192.1.2.23:500
 1v2 "westnet-eastnet-ikev2a" #1: sent IKE_AUTH request {cipher=AES_GCM_16_256 integ=n/a prf=HMAC_SHA2_512 group=MODP2048}
-003 "westnet-eastnet-ikev2a" #1: initiator established IKE SA; authenticated using authby=secret and peer ID_FQDN '@east'
+003 "westnet-eastnet-ikev2a" #1: initiator established IKE SA; authenticated peer using authby=secret and ID_FQDN '@east'
 004 "westnet-eastnet-ikev2a" #2: initiator established Child SA using #1; IPsec tunnel [192.0.1.0-192.0.1.255:0-65535 0] -> [192.0.2.0-192.0.2.255:0-65535 0] {ESP/ESN=>0xESPESP <0xESPESP xfrm=AES_GCM_16_256-NONE DPD=passive}
 west #
  ping -n -q -w 1 -c 4 -I 192.0.1.254 192.0.2.254
@@ -78,7 +78,7 @@ west #
 000 "westnet-eastnet-ikev2b":   our auth:secret, their auth:secret, our autheap:none, their autheap:none;
 000 "westnet-eastnet-ikev2b":   modecfg info: us:none, them:none, modecfg policy:push, dns:unset, domains:unset, cat:unset;
 000 "westnet-eastnet-ikev2b":   sec_label:unset;
-000 "westnet-eastnet-ikev2b":   ike_life: 28800s; ipsec_life: 28800s; replay_window: 128; rekey_margin: 540s; rekey_fuzz: 100%; keyingtries: 0;
+000 "westnet-eastnet-ikev2b":   ike_life: 28800s; ipsec_life: 28800s; ipsec_max_bytes: 2^63B; ipsec_max_packets: 2^63; replay_window: 128; rekey_margin: 540s; rekey_fuzz: 100%; keyingtries: 0;
 000 "westnet-eastnet-ikev2b":   retransmit-interval: 9999ms; retransmit-timeout: 99s; iketcp:no; iketcp-port:4500;
 000 "westnet-eastnet-ikev2b":   initial-contact:no; cisco-unity:no; fake-strongswan:no; send-vendorid:no; send-no-esp-tfc:no;
 000 "westnet-eastnet-ikev2b":   policy: IKEv2+PSK+ENCRYPT+TUNNEL+DONT_REKEY+UP+IKE_FRAG_ALLOW+ESN_NO+ESN_YES;
@@ -88,14 +88,14 @@ west #
 000 "westnet-eastnet-ikev2b":   our idtype: ID_FQDN; our id=@west; their idtype: ID_FQDN; their id=@east
 000 "westnet-eastnet-ikev2b":   liveness: passive; dpdaction:hold; dpddelay:0s; retransmit-timeout:60s
 000 "westnet-eastnet-ikev2b":   nat-traversal: encaps:auto; keepalive:20s
-000 "westnet-eastnet-ikev2b":   newest ISAKMP SA: #0; newest IPsec SA: #0; conn serial: $2;
+000 "westnet-eastnet-ikev2b":   newest IKE SA: #0; newest IPsec SA: #0; conn serial: $2;
 000 "westnet-eastnet-ikev2c": 192.0.1.0/24===192.1.2.45[@west]...192.1.2.23[@east]===192.0.201.0/24; unrouted; eroute owner: #0
 000 "westnet-eastnet-ikev2c":     oriented; my_ip=unset; their_ip=unset; my_updown=ipsec _updown;
 000 "westnet-eastnet-ikev2c":   xauth us:none, xauth them:none,  my_username=[any]; their_username=[any]
 000 "westnet-eastnet-ikev2c":   our auth:secret, their auth:secret, our autheap:none, their autheap:none;
 000 "westnet-eastnet-ikev2c":   modecfg info: us:none, them:none, modecfg policy:push, dns:unset, domains:unset, cat:unset;
 000 "westnet-eastnet-ikev2c":   sec_label:unset;
-000 "westnet-eastnet-ikev2c":   ike_life: 28800s; ipsec_life: 28800s; replay_window: 128; rekey_margin: 540s; rekey_fuzz: 100%; keyingtries: 0;
+000 "westnet-eastnet-ikev2c":   ike_life: 28800s; ipsec_life: 28800s; ipsec_max_bytes: 2^63B; ipsec_max_packets: 2^63; replay_window: 128; rekey_margin: 540s; rekey_fuzz: 100%; keyingtries: 0;
 000 "westnet-eastnet-ikev2c":   retransmit-interval: 9999ms; retransmit-timeout: 99s; iketcp:no; iketcp-port:4500;
 000 "westnet-eastnet-ikev2c":   initial-contact:no; cisco-unity:no; fake-strongswan:no; send-vendorid:no; send-no-esp-tfc:no;
 000 "westnet-eastnet-ikev2c":   policy: IKEv2+PSK+ENCRYPT+TUNNEL+UP+IKE_FRAG_ALLOW+ESN_NO+ESN_YES;
@@ -105,7 +105,7 @@ west #
 000 "westnet-eastnet-ikev2c":   our idtype: ID_FQDN; our id=@west; their idtype: ID_FQDN; their id=@east
 000 "westnet-eastnet-ikev2c":   liveness: passive; dpdaction:hold; dpddelay:0s; retransmit-timeout:60s
 000 "westnet-eastnet-ikev2c":   nat-traversal: encaps:auto; keepalive:20s
-000 "westnet-eastnet-ikev2c":   newest ISAKMP SA: #0; newest IPsec SA: #0; conn serial: $3;
+000 "westnet-eastnet-ikev2c":   newest IKE SA: #0; newest IPsec SA: #0; conn serial: $3;
 west #
  echo done
 done

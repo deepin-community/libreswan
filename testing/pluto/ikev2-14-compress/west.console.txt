@@ -33,7 +33,7 @@ west #
 000 "westnet-eastnet-ipcomp":   our auth:rsasig(RSASIG+RSASIG_v1_5), their auth:RSASIG+ECDSA+RSASIG_v1_5, our autheap:none, their autheap:none;
 000 "westnet-eastnet-ipcomp":   modecfg info: us:none, them:none, modecfg policy:push, dns:unset, domains:unset, cat:unset;
 000 "westnet-eastnet-ipcomp":   sec_label:unset;
-000 "westnet-eastnet-ipcomp":   ike_life: 28800s; ipsec_life: 28800s; replay_window: 128; rekey_margin: 540s; rekey_fuzz: 100%; keyingtries: 0;
+000 "westnet-eastnet-ipcomp":   ike_life: 28800s; ipsec_life: 28800s; ipsec_max_bytes: 2^63B; ipsec_max_packets: 2^63; replay_window: 128; rekey_margin: 540s; rekey_fuzz: 100%; keyingtries: 0;
 000 "westnet-eastnet-ipcomp":   retransmit-interval: 9999ms; retransmit-timeout: 99s; iketcp:no; iketcp-port:4500;
 000 "westnet-eastnet-ipcomp":   initial-contact:no; cisco-unity:no; fake-strongswan:no; send-vendorid:no; send-no-esp-tfc:no;
 000 "westnet-eastnet-ipcomp":   policy: IKEv2+RSASIG+ECDSA+RSASIG_v1_5+ENCRYPT+COMPRESS+TUNNEL+PFS+IKE_FRAG_ALLOW+ESN_NO+ESN_YES;
@@ -43,50 +43,44 @@ west #
 000 "westnet-eastnet-ipcomp":   our idtype: ID_FQDN; our id=@west; their idtype: ID_FQDN; their id=@east
 000 "westnet-eastnet-ipcomp":   liveness: passive; dpdaction:hold; dpddelay:0s; retransmit-timeout:60s
 000 "westnet-eastnet-ipcomp":   nat-traversal: encaps:auto; keepalive:20s
-000 "westnet-eastnet-ipcomp":   newest ISAKMP SA: #0; newest IPsec SA: #0; conn serial: $1;
+000 "westnet-eastnet-ipcomp":   newest IKE SA: #0; newest IPsec SA: #0; conn serial: $1;
 west #
  echo "initdone"
 initdone
 west #
  ipsec auto --up westnet-eastnet-ipcomp
 1v2 "westnet-eastnet-ipcomp" #1: initiating IKEv2 connection
-1v2 "westnet-eastnet-ipcomp" #1: sent IKE_SA_INIT request
+1v2 "westnet-eastnet-ipcomp" #1: sent IKE_SA_INIT request to 192.1.2.23:500
 1v2 "westnet-eastnet-ipcomp" #1: sent IKE_AUTH request {cipher=AES_GCM_16_256 integ=n/a prf=HMAC_SHA2_512 group=MODP2048}
-003 "westnet-eastnet-ipcomp" #1: initiator established IKE SA; authenticated using RSASSA-PSS with SHA2_512 and preloaded certificate '@east'
+003 "westnet-eastnet-ipcomp" #1: initiator established IKE SA; authenticated peer '2nnn-bit RSASSA-PSS with SHA2_512' digital signature using preloaded certificate '@east'
 004 "westnet-eastnet-ipcomp" #2: initiator established Child SA using #1; IPsec tunnel [192.0.1.0-192.0.1.255:0-65535 0] -> [192.0.2.0-192.0.2.255:0-65535 0] {ESP/ESN=>0xESPESP <0xESPESP xfrm=AES_GCM_16_256-NONE IPCOMP=>0xESPESP <0xESPESP DPD=passive}
 west #
- # first pings hit regular ESP since pings too small to compress
+ # First ping hit regular ESP since pings too small to compress.  This
 west #
- ping -n -q -c 4 -I 192.0.1.254 192.0.2.254
-PING 192.0.2.254 (192.0.2.254) from 192.0.1.254 : 56(84) bytes of data.
---- 192.0.2.254 ping statistics ---
-4 packets transmitted, 4 received, 0% packet loss, time XXXX
-rtt min/avg/max/mdev = 0.XXX/0.XXX/0.XXX/0.XXX ms
+ # oddly shows up as 0 packets and 4 packets on ipcomp.
 west #
- # this oddly shows up as 0 packets and 4 packets on ipcomp
+ ../../guestbin/ping-once.sh --up --small -I 192.0.1.254 192.0.2.254
+up
 west #
  ip -o -s xfrm state|grep "proto comp" | sed "s/^\(.*\)\(lifetime current:.*\)\(add .*$\)/\2/"
 lifetime current:\	  0(bytes), 0(packets)\	  
-lifetime current:\	  336(bytes), 4(packets)\	  
+lifetime current:\	  40(bytes), 1(packets)\	  
 west #
- # test compression via large pings that can be compressed on IPCOMP SA
+ # Finally test compression via large pings that can be compressed on
 west #
- ping -n -q -c 4 -s 8184  -p ff -I 192.0.1.254 192.0.2.254
-PING 192.0.2.254 (192.0.2.254) from 192.0.1.254 : 8184(8212) bytes of data.
---- 192.0.2.254 ping statistics ---
-4 packets transmitted, 4 received, 0% packet loss, time XXXX
-rtt min/avg/max/mdev = 0.XXX/0.XXX/0.XXX/0.XXX ms
+ # IPCOMP SA.  This then shows up as 4 packets and 8 packets on ipcomp.
 west #
- # this then  shows up as 4 packets and 8 packets on ipcomp
+ ../../guestbin/ping-once.sh --up --large -I 192.0.1.254 192.0.2.254
+up
 west #
  ip -o -s xfrm state|grep "proto comp" | sed "s/^\(.*\)\(lifetime current:.*\)\(add .*$\)/\2/"
-lifetime current:\	  32848(bytes), 4(packets)\	  
-lifetime current:\	  33184(bytes), 8(packets)\	  
+lifetime current:\	  8028(bytes), 1(packets)\	  
+lifetime current:\	  8068(bytes), 2(packets)\	  
 west #
- # We cannot run ipsec whack --trafficstatus because compression causes the byte count to slightly differ each run
+ # Need to edit packets.
 west #
- echo done
-done
+ ipsec whack --trafficstatus | sed -e 's/Bytes=\([0-9]\)[0-9][0-9],/Bytes=\1nn,/g'
+006 #2: "westnet-eastnet-ipcomp", type=ESP, add_time=1234567890, inBytes=1nn, outBytes=1nn, maxBytes=2^63B, id='@east'
 west #
  ../../guestbin/ipsec-look.sh
 west NOW
@@ -146,7 +140,15 @@ src 192.0.2.0/24 dst 192.0.1.0/24
 		proto esp reqid REQID mode transport
 XFRM done
 IPSEC mangle TABLES
-NEW_IPSEC_CONN mangle TABLES
+iptables filter TABLE
+Chain INPUT (policy ACCEPT)
+target     prot opt source               destination         
+ACCEPT     all  --  0.0.0.0/0            0.0.0.0/0            policy match dir in pol ipsec
+DROP       all  --  192.0.2.0/24         0.0.0.0/0           
+Chain FORWARD (policy ACCEPT)
+target     prot opt source               destination         
+Chain OUTPUT (policy ACCEPT)
+target     prot opt source               destination         
 ROUTING TABLES
 default via 192.1.2.254 dev eth1
 192.0.1.0/24 dev eth0 proto kernel scope link src 192.0.1.254

@@ -15,7 +15,7 @@ east #
 000 "westnet-eastnet-aes256":   our auth:rsasig, their auth:rsasig, our autheap:none, their autheap:none;
 000 "westnet-eastnet-aes256":   modecfg info: us:none, them:none, modecfg policy:push, dns:unset, domains:unset, cat:unset;
 000 "westnet-eastnet-aes256":   sec_label:unset;
-000 "westnet-eastnet-aes256":   ike_life: 28800s; ipsec_life: 28800s; replay_window: 128; rekey_margin: 540s; rekey_fuzz: 100%; keyingtries: 0;
+000 "westnet-eastnet-aes256":   ike_life: 28800s; ipsec_life: 28800s; ipsec_max_bytes: 2^63B; ipsec_max_packets: 2^63; replay_window: 128; rekey_margin: 540s; rekey_fuzz: 100%; keyingtries: 0;
 000 "westnet-eastnet-aes256":   retransmit-interval: 9999ms; retransmit-timeout: 99s; iketcp:no; iketcp-port:4500;
 000 "westnet-eastnet-aes256":   initial-contact:no; cisco-unity:no; fake-strongswan:no; send-vendorid:no; send-no-esp-tfc:no;
 000 "westnet-eastnet-aes256":   policy: IKEv1+RSASIG+ENCRYPT+TUNNEL+PFS+IKE_FRAG_ALLOW+ESN_NO+ESN_YES;
@@ -66,7 +66,13 @@ src 192.0.2.0/24 dst 192.0.1.0/24
 		proto esp reqid REQID mode tunnel
 XFRM done
 IPSEC mangle TABLES
-NEW_IPSEC_CONN mangle TABLES
+iptables filter TABLE
+Chain INPUT (policy ACCEPT)
+target     prot opt source               destination         
+Chain FORWARD (policy ACCEPT)
+target     prot opt source               destination         
+Chain OUTPUT (policy ACCEPT)
+target     prot opt source               destination         
 ROUTING TABLES
 default via 192.1.2.254 dev eth1
 192.0.1.0/24 via 192.1.2.45 dev eth1

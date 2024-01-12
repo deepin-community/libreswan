@@ -53,11 +53,9 @@ bool create_ppk_id_payload(chunk_t *ppk_id, struct ppk_id_payload *payl)
  */
 bool emit_unified_ppk_id(struct ppk_id_payload *payl, pb_stream *outs)
 {
-	diag_t d;
 	uint8_t type = PPK_ID_FIXED;
-	d = pbs_out_raw(outs, &type, sizeof(type), "PPK_ID_FIXED");
-	if (d != NULL) {
-		llog_diag(RC_LOG_SERIOUS, outs->outs_logger, &d, "%s", "");
+	if (!pbs_out_raw(outs, &type, sizeof(type), "PPK_ID_FIXED")) {
+		/* already logged */
 		return false;
 	}
 	return out_hunk(payl->ppk_id, outs, "PPK_ID");
@@ -116,6 +114,55 @@ bool extract_v2N_ppk_identity(const struct pbs_in *notify_pbs,
 	return true;
 }
 
+static bool ikev2_calculate_hash(struct ike_sa *ike,
+				 const struct crypt_mac *idhash,
+				 pb_stream *a_pbs,
+				 chunk_t *no_ppk_auth, /* optional output */
+				 const struct hash_desc *hash_algo,
+				 const struct pubkey_signer *signer)
+{
+	const struct pubkey_type *type = &pubkey_type_rsa;
+	statetime_t start = statetime_start(&ike->sa);
+	const struct connection *c = ike->sa.st_connection;
+
+	const struct secret_stuff *pks = get_local_private_key(c, type,
+								    ike->sa.st_logger);
+	if (pks == NULL) {
+		log_state(RC_LOG, &ike->sa, "No %s private key found", type->name);
+		return false; /* failure: no key to use */
+	}
+
+	struct crypt_mac hash = v2_calculate_sighash(ike, idhash, hash_algo,
+						     LOCAL_PERSPECTIVE);
+	passert(hash.len <= sizeof(hash.ptr/*array*/));
+
+	if (DBGP(DBG_CRYPT)) {
+		DBG_dump_hunk("v2rsa octets", *idhash);
+	}
+
+	/* now generate signature blob */
+	statetime_t sign_time = statetime_start(&ike->sa);
+	struct hash_signature sig;
+	sig = signer->sign_hash(pks, idhash->ptr, idhash->len,
+				hash_algo, ike->sa.st_logger);
+	statetime_stop(&sign_time, "%s() calling sign_hash_RSA()", __func__);
+	if (sig.len == 0)
+		return false;
+
+	if (no_ppk_auth != NULL) {
+		*no_ppk_auth = clone_hunk(sig, "NO_PPK_AUTH chunk");
+		if (DBGP(DBG_PRIVATE) || DBGP(DBG_CRYPT)) {
+			DBG_dump_hunk("NO_PPK_AUTH payload", *no_ppk_auth);
+		}
+	} else {
+		if (!out_hunk(sig, a_pbs, "rsa signature"))
+			return false;
+	}
+
+	statetime_stop(&start, "%s()", __func__);
+	return true;
+}
+
 bool ikev2_calc_no_ppk_auth(struct ike_sa *ike,
 			    const struct crypt_mac *id_hash,
 			    chunk_t *no_ppk_auth /* output */)
@@ -132,8 +179,9 @@ bool ikev2_calc_no_ppk_auth(struct ike_sa *ike,
 		if (hash_algo == NULL) {
 			if (c->config->sighash_policy == LEMPTY) {
 				/* RSA with SHA1 without Digsig: no oid blob appended */
-				if (!ikev2_calculate_rsa_hash(ike, id_hash, NULL, no_ppk_auth,
-							      &ike_alg_hash_sha1)) {
+				if (!ikev2_calculate_hash(ike, id_hash, NULL, no_ppk_auth,
+							  &ike_alg_hash_sha1,
+							  &pubkey_signer_raw_pkcs1_1_5_rsa)) {
 					return false;
 				}
 				return true;
@@ -153,8 +201,8 @@ bool ikev2_calc_no_ppk_auth(struct ike_sa *ike,
 		}
 
 		chunk_t hashval = NULL_HUNK;
-		if (!ikev2_calculate_rsa_hash(ike, id_hash, NULL, &hashval,
-					      hash_algo)) {
+		if (!ikev2_calculate_hash(ike, id_hash, NULL, &hashval,
+					  hash_algo, &pubkey_signer_digsig_rsassa_pss)) {
 			return false;
 		}
 

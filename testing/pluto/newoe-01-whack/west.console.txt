@@ -22,7 +22,7 @@ west #
  ipsec whack --oppohere 192.1.2.45 --oppothere 192.1.2.23 --oppoproto 1 --opposport 8 --oppodport 0
 002 initiate on-demand for packet 192.1.2.45:8-ICMP->192.1.2.23:0 by whack
 1v2 "private-or-clear#192.1.2.0/24"[1] ...192.1.2.23 #1: initiating IKEv2 connection
-003 "private-or-clear#192.1.2.0/24"[1] ...192.1.2.23 #1: initiator established IKE SA; authenticated using authby=null and peer ID_NULL 'ID_NULL'
+003 "private-or-clear#192.1.2.0/24"[1] ...192.1.2.23 #1: initiator established IKE SA; authenticated peer using authby=null and ID_NULL 'ID_NULL'
 004 "private-or-clear#192.1.2.0/24"[1] ...192.1.2.23 #2: initiator established Child SA using #1; IPsec tunnel [192.1.2.45-192.1.2.45:0-65535 0] -> [192.1.2.23-192.1.2.23:0-65535 0] {ESP/ESN=>0xESPESP <0xESPESP xfrm=AES_GCM_16_256-NONE DPD=passive}
 west #
  ../../guestbin/ping-once.sh --up 192.1.2.23
@@ -31,7 +31,7 @@ west #
  # should show traffic
 west #
  ipsec whack --trafficstatus
-006 #2: "private-or-clear#192.1.2.0/24"[1] ...192.1.2.23, type=ESP, add_time=1234567890, inBytes=84, outBytes=84, id='ID_NULL'
+006 #2: "private-or-clear#192.1.2.0/24"[1] ...192.1.2.23, type=ESP, add_time=1234567890, inBytes=84, outBytes=84, maxBytes=2^63B, id='ID_NULL'
 west #
  echo done
 done
@@ -98,7 +98,13 @@ src 192.1.2.45/32 dst 192.1.2.0/24
 		proto esp reqid 0 mode transport
 XFRM done
 IPSEC mangle TABLES
-NEW_IPSEC_CONN mangle TABLES
+iptables filter TABLE
+Chain INPUT (policy ACCEPT)
+target     prot opt source               destination         
+Chain FORWARD (policy ACCEPT)
+target     prot opt source               destination         
+Chain OUTPUT (policy ACCEPT)
+target     prot opt source               destination         
 ROUTING TABLES
 default via 192.1.2.254 dev eth1
 192.0.1.0/24 dev eth0 proto kernel scope link src 192.0.1.254

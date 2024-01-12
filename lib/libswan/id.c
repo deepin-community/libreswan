@@ -30,7 +30,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-
 #include "sysdep.h"
 #include "constants.h"
 #include "passert.h"
@@ -42,6 +41,7 @@
 #include <cert.h>
 #include "certs.h"
 #include "ip_info.h"
+#include "ttodata.h"
 
 const struct id empty_id = {
 	.kind = ID_NONE,
@@ -135,10 +135,9 @@ err_t atoid(const char *src, struct id *id)
 		 * Discard @#, convert from hex to bin.
 		 */
 		src += 2; /* drop "@#" */
-		chunk_t name = alloc_chunk(strlen(src) / 2, "key id");
-		err_t ugh = ttodata(src, 0, 16, (void*)name.ptr, name.len, &name.len);
+		chunk_t name = NULL_HUNK;
+		err_t ugh = ttochunk(shunk1(src), 16, &name);
 		if (ugh != NULL) {
-			free_chunk_content(&name);
 			return ugh;
 		}
 		*id = (struct id) {
@@ -157,10 +156,9 @@ err_t atoid(const char *src, struct id *id)
 		 * discard @~, convert from hex to bin.
 		 */
 		src += 2; /* drop "@~" */
-		chunk_t name = alloc_chunk(strlen(src) / 2, "dn id");
-		err_t ugh = ttodata(src + 2, 0, 16, (void*)name.ptr, name.len, &name.len);
+		chunk_t name = NULL_HUNK;
+		err_t ugh = ttochunk(shunk1(src), 16, &name);
 		if (ugh != NULL) {
-			free_chunk_content(&name);
 			return ugh;
 		}
 		*id = (struct id) {

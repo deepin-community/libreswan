@@ -138,10 +138,10 @@ intmax_t deltasecs(deltatime_t d)
 	return d.dt.tv_sec;
 }
 
-deltatime_t deltatimescale(int num, int denom, deltatime_t d)
+deltatime_t deltatime_scale(deltatime_t d, int num, int denom)
 {
 	/* ??? should check for overflow */
-	return deltatime(deltasecs(d) * num / denom);
+	return deltatime((deltasecs(d) * num) / denom);
 }
 
 struct timeval timeval_from_deltatime(deltatime_t d)
@@ -188,31 +188,4 @@ const char *str_deltatime(deltatime_t d, deltatime_buf *out)
 	struct jambuf buf = ARRAY_AS_JAMBUF(out->buf);
 	jam_deltatime(&buf, d);
 	return out->buf;
-}
-
-diag_t ttodeltatime(const char *t, deltatime_t *d, const struct timescale *default_scale)
-{
-	*d = deltatime_zero;
-
-	uintmax_t time;
-	shunk_t cursor = shunk1(t);
-	err_t err = shunk_to_uintmax(cursor, &cursor, 10/*any-base*/, &time, 0/*ceiling*/);
-	if (err != NULL) {
-		return diag("bad duration value \"%s\": %s", t, err);
-	}
-
-	const struct timescale *scale = ttotimescale(cursor, default_scale);
-	if (scale == NULL) {
-		return diag("unrecognized duration multiplier \""PRI_SHUNK"\"",
-			    pri_shunk(cursor));
-	}
-
-	/* XXX: I guess this works? */
-	if (UINTMAX_MAX / scale->ms < time) {
-		return diag("duration too large: \"%s\" is more than %u seconds",
-			    t, UINT_MAX);
-	}
-
-	*d = deltatime_ms(time * scale->ms);
-	return NULL;
 }

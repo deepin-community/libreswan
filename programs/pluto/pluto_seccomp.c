@@ -114,6 +114,9 @@ static void init_seccomp(uint32_t def_action, bool main, struct logger *logger)
 		LSW_SECCOMP_ADD(readlinkat);
 		LSW_SECCOMP_ADD(recvfrom);
 		LSW_SECCOMP_ADD(recvmsg);
+#if SCMP_SYS(rseq)
+		LSW_SECCOMP_ADD(rseq);
+#endif
 		LSW_SECCOMP_ADD(select);
 		LSW_SECCOMP_ADD(sendmsg);
 		LSW_SECCOMP_ADD(set_robust_list);
@@ -158,6 +161,7 @@ static void init_seccomp(uint32_t def_action, bool main, struct logger *logger)
 	LSW_SECCOMP_ADD(sigreturn);
 	LSW_SECCOMP_ADD(stat);
 	LSW_SECCOMP_ADD(statfs);
+	LSW_SECCOMP_ADD(statfs64);
 	LSW_SECCOMP_ADD(waitpid);
 	LSW_SECCOMP_ADD(write);
 
@@ -165,7 +169,7 @@ static void init_seccomp(uint32_t def_action, bool main, struct logger *logger)
 	if (rc < 0) {
 		seccomp_release(ctx);
 		fatal_errno(PLUTO_EXIT_SECCOMP_FAIL, logger, -rc,
-			    "seccomp_load() failed!");
+			    "seccomp_load() failed");
 	}
 }
 

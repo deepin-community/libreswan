@@ -18,6 +18,7 @@
  * Copyright (C) 2019 Andrew Cagney <cagney@gnu.org>
  * Copyright (C) 2019 Tuomo Soini <tis@foobar.fi>
  * Copyright (C) 2020 Yulia Kuzovkova <ukuzovkova@gmail.com>
+ * Copyright (C) 20212-2022 Paul Wouters <paul.wouters@aiven.io>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -37,7 +38,6 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/types.h>
-#include <sys/socket.h>
 #include <sys/un.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -45,11 +45,11 @@
 #include <assert.h>
 #include <limits.h>	/* for INT_MAX */
 
-#include <libreswan.h>
+#include "lsw_socket.h"
 
+#include "ttodata.h"
+#include "lswversion.h"
 #include "lswtool.h"
-#include "sysdep.h"
-#include "socketwrapper.h"
 #include "constants.h"
 #include "lswlog.h"
 #include "whack.h"
@@ -99,12 +99,13 @@ static void help(void)
 		"	[--pfsgroup <modp1024 | modp1536 | modp2048 | \\\n"
 		"		modp3072 | modp4096 | modp6144 | modp8192 \\\n"
 		"		dh22 | dh23 | dh24>] \\\n"
-		"	[--ikelifetime <seconds>] [--ipseclifetime <seconds>] \\\n"
+		"	[--ike-lifetime <seconds>] [--ipsec-lifetime <seconds>] \\\n"
+		"	[--ipsec-max-bytes <num>] [--ipsec-max-packets <num>] \\\n"
 		"	[--rekeymargin <seconds>] [--rekeyfuzz <percentage>] \\\n"
 		"	[--retransmit-timeout <seconds>] \\\n"
 		"	[--retransmit-interval <msecs>] \\\n"
-		"	[--send-redirect] [--redirect-to] \\\n"
-		"	[--accept-redirect] [--accept-redirect-to] \\\n"
+		"	[--send-redirect] [--redirect-to <ip>] \\\n"
+		"	[--accept-redirect] [--accept-redirect-to <ip>] \\\n"
 		"	[--keyingtries <count>] \\\n"
 		"	[--replay-window <num>] \\\n"
 		"	[--esp <esp-algos>] \\\n"
@@ -207,7 +208,7 @@ static void help(void)
 		"\n"
 		"refresh dns: whack --ddns\n"
 		"\n"
-#ifdef HAVE_SECCOMP
+#ifdef USE_SECCOMP
 		"testing: whack --seccomp-crashtest (CAREFUL!)\n"
 		"\n"
 #endif
@@ -342,7 +343,7 @@ enum option_enums {
 	OPT_BRIEF_STATUS,
 	OPT_PROCESS_STATUS,
 
-#ifdef HAVE_SECCOMP
+#ifdef USE_SECCOMP
 	OPT_SECCOMP_CRASHTEST,
 #endif
 
@@ -444,12 +445,14 @@ enum option_enums {
 
 	CD_RETRANSMIT_TIMEOUT,
 	CD_RETRANSMIT_INTERVAL,
-	CD_IKELIFETIME,
-	CD_IPSECLIFETIME,
+	CD_IKE_LIFETIME,
+	CD_IPSEC_LIFETIME,
+	CD_IPSEC_MAX_BYTES,
+	CD_IPSEC_MAX_PACKETS,
 	CD_REKEYMARGIN,
 	CD_RKFUZZ,
 	CD_KTRIES,
-	CD_REPLAY_W,
+	CD_REPLAY_WINDOW,
 	CD_DPDDELAY,
 	CD_DPDTIMEOUT,
 	CD_DPDACTION,
@@ -627,7 +630,7 @@ static const struct option long_opts[] = {
 	{ "briefstatus", no_argument, NULL, OPT_BRIEF_STATUS + OO },
 	{ "processstatus", no_argument, NULL, OPT_PROCESS_STATUS + OO },
 	{ "showstates", no_argument, NULL, OPT_SHOW_STATES + OO },
-#ifdef HAVE_SECCOMP
+#ifdef USE_SECCOMP
 	{ "seccomp-crashtest", no_argument, NULL, OPT_SECCOMP_CRASHTEST + OO },
 #endif
 	{ "shutdown", no_argument, NULL, OPT_SHUTDOWN + OO },
@@ -771,8 +774,11 @@ static const struct option long_opts[] = {
 	{ "sendca", required_argument, NULL, CD_SEND_CA + OO },
 	{ "ipv4", no_argument, NULL, CD_CONNIPV4 + OO },
 	{ "ipv6", no_argument, NULL, CD_CONNIPV6 + OO },
-	{ "ikelifetime", required_argument, NULL, CD_IKELIFETIME + OO },
-	{ "ipseclifetime", required_argument, NULL, CD_IPSECLIFETIME + OO },
+	{ "ikelifetime", required_argument, NULL, CD_IKE_LIFETIME + OO },
+	{ "ipseclifetime", required_argument, NULL, CD_IPSEC_LIFETIME + OO }, /* backwards compat */
+	{ "ipsec-lifetime", required_argument, NULL, CD_IPSEC_LIFETIME + OO },
+	{ "ipsec-max-bytes", required_argument, NULL, CD_IPSEC_MAX_BYTES + OO + NUMERIC_ARG},
+	{ "ipsec-max-packets", required_argument, NULL, CD_IPSEC_MAX_PACKETS + OO + NUMERIC_ARG},
 	{ "retransmit-timeout", required_argument, NULL, CD_RETRANSMIT_TIMEOUT + OO },
 	{ "retransmit-interval", required_argument, NULL, CD_RETRANSMIT_INTERVAL + OO },
 	{ "rekeymargin", required_argument, NULL, CD_REKEYMARGIN + OO },
@@ -780,7 +786,7 @@ static const struct option long_opts[] = {
 	{ "rekeywindow", required_argument, NULL, CD_REKEYMARGIN + OO + NUMERIC_ARG },
 	{ "rekeyfuzz", required_argument, NULL, CD_RKFUZZ + OO + NUMERIC_ARG },
 	{ "keyingtries", required_argument, NULL, CD_KTRIES + OO + NUMERIC_ARG },
-	{ "replay-window", required_argument, NULL, CD_REPLAY_W + OO + NUMERIC_ARG },
+	{ "replay-window", required_argument, NULL, CD_REPLAY_WINDOW + OO },
 	{ "ike",    required_argument, NULL, CD_IKE + OO },
 	{ "ikealg", required_argument, NULL, CD_IKE + OO },
 	{ "pfsgroup", required_argument, NULL, CD_PFSGROUP + OO },
@@ -918,7 +924,7 @@ static ip_address get_address_any(struct family *family)
 struct sockaddr_un ctl_addr = {
 	.sun_family = AF_UNIX,
 	.sun_path  = DEFAULT_CTL_SOCKET,
-#if defined(HAS_SUN_LEN)
+#ifdef USE_SOCKADDR_LEN
 	.sun_len = sizeof(struct sockaddr_un),
 #endif
 };
@@ -927,7 +933,15 @@ static void optarg_to_deltatime(deltatime_t *deltatime, const struct timescale *
 {
 	diag_t diag = ttodeltatime(optarg, deltatime, timescale);
 	if (diag != NULL) {
-		diagw(str_diag(diag));
+		diagq(str_diag(diag), optarg);
+	}
+}
+
+static void optarg_to_uintmax(uintmax_t *val)
+{
+	err_t err = shunk_to_uintmax(shunk1(optarg), NULL, /*base*/0, val);
+	if (err != NULL) {
+		diagq(err, optarg);
 	}
 }
 
@@ -937,7 +951,7 @@ static void check_life_time(deltatime_t life, time_t raw_limit,
 			    const struct whack_message *msg)
 {
 	deltatime_t limit = deltatime(raw_limit);
-	deltatime_t mint = deltatimescale(100 + msg->sa_rekey_fuzz, 100, msg->sa_rekey_margin);
+	deltatime_t mint = deltatime_scale(msg->sa_rekey_margin, 100 + msg->sa_rekey_fuzz/*percent*/, 100);
 
 	if (deltatime_cmp(limit, <, life)) {
 		char buf[200];	/* arbitrary limit */
@@ -1014,9 +1028,6 @@ int main(int argc, char **argv)
 		end_seen = LEMPTY,
 		algo_seen = LEMPTY;
 
-	/* space for at most one RSA key */
-	char keyspace[RSA_MAX_ENCODING_BYTES];
-
 	char xauthusername[MAX_XAUTH_USERNAME_LEN];
 	char xauthpass[XAUTH_MAX_PASS_LENGTH];
 	int usernamelen = 0;
@@ -1070,6 +1081,8 @@ int main(int argc, char **argv)
 	msg.nic_offload = yna_auto;
 	msg.sa_ike_life_seconds = deltatime(IKE_SA_LIFETIME_DEFAULT);
 	msg.sa_ipsec_life_seconds = deltatime(IPSEC_SA_LIFETIME_DEFAULT);
+	msg.sa_ipsec_max_bytes = IPSEC_SA_MAX_OPERATIONS; /* max uint_64_t */
+	msg.sa_ipsec_max_packets = IPSEC_SA_MAX_OPERATIONS; /* max uint_64_t */
 	msg.sa_rekey_margin = deltatime(SA_REPLACEMENT_MARGIN_DEFAULT);
 	msg.sa_rekey_fuzz = SA_REPLACEMENT_FUZZ_DEFAULT;
 	msg.sa_keying_tries = SA_REPLACEMENT_RETRIES_DEFAULT;
@@ -1097,7 +1110,7 @@ int main(int argc, char **argv)
 
 	for (;;) {
 		/* numeric argument for some flags */
-		unsigned long opt_whole = 0;
+		uintmax_t opt_whole = 0;
 
 		/*
 		 * Note: we don't like the way short options get parsed
@@ -1112,9 +1125,7 @@ int main(int argc, char **argv)
 		if (0 <= c) {
 			if (c & NUMERIC_ARG) {
 				c -= NUMERIC_ARG;
-				if (ttoul(optarg, 0, 0, &opt_whole) != NULL)
-					diagq("badly formed numeric argument",
-					      optarg);
+				optarg_to_uintmax(&opt_whole);
 			}
 			if (c >= (1 << AUX_SHIFT)) {
 				aux = c >> AUX_SHIFT;
@@ -1310,18 +1321,11 @@ int main(int argc, char **argv)
 			continue;
 
 		case OPT_PUBKEYRSA:	/* --pubkeyrsa <key> */
-		{
-			char mydiag_space[TTODATAV_BUF];
-
 			if (msg.keyval.ptr != NULL)
 				diagq("only one RSA public-key allowed", optarg);
 
-			ugh = ttodatav(optarg, 0, 0,
-				       keyspace, sizeof(keyspace),
-				       &msg.keyval.len, mydiag_space,
-				       sizeof(mydiag_space),
-				       TTODATAV_SPACECOUNTS);
-
+			/* let msg.keyval leak */
+			ugh = ttochunk(shunk1(optarg), 0, &msg.keyval);
 			if (ugh != NULL) {
 				/* perhaps enough space */
 				char ugh_space[80];
@@ -1331,23 +1335,15 @@ int main(int argc, char **argv)
 					 ugh);
 				diagq(ugh_space, optarg);
 			}
-			msg.pubkey_alg = PUBKEY_ALG_RSA;
-			msg.keyval.ptr = (unsigned char *)keyspace;
-		}
+			msg.pubkey_alg = IPSECKEY_ALGORITHM_RSA;
 			continue;
-		case OPT_PUBKEYECDSA:	/* --pubkeyecdsa <key> */
-		{
-			char mydiag_space[TTODATAV_BUF];
 
+		case OPT_PUBKEYECDSA:	/* --pubkeyecdsa <key> */
 			if (msg.keyval.ptr != NULL)
 				diagq("only one ECDSA public-key allowed", optarg);
 
-			ugh = ttodatav(optarg, 0, 0,
-				       keyspace, sizeof(keyspace),
-				       &msg.keyval.len, mydiag_space,
-				       sizeof(mydiag_space),
-				       TTODATAV_SPACECOUNTS);
-
+			/* let msg.keyval leak */
+			ugh = ttochunk(shunk1(optarg), 0, &msg.keyval);
 			if (ugh != NULL) {
 				/* perhaps enough space */
 				char ugh_space[80];
@@ -1357,9 +1353,7 @@ int main(int argc, char **argv)
 					 ugh);
 				diagq(ugh_space, optarg);
 			}
-			msg.pubkey_alg = PUBKEY_ALG_ECDSA;
-			msg.keyval.ptr = (unsigned char *)keyspace;
-		}
+			msg.pubkey_alg = IPSECKEY_ALGORITHM_ECDSA;
 			continue;
 
 		case OPT_ROUTE:	/* --route */
@@ -1526,7 +1520,7 @@ int main(int argc, char **argv)
 			msg.whack_show_states = true;
 			ignore_errors = true;
 			continue;
-#ifdef HAVE_SECCOMP
+#ifdef USE_SECCOMP
 		case OPT_SECCOMP_CRASHTEST:	/* --seccomp-crashtest */
 			msg.whack_seccomp_crashtest = true;
 			continue;
@@ -1902,12 +1896,20 @@ int main(int argc, char **argv)
 			optarg_to_deltatime(&msg.retransmit_interval, &timescale_milliseconds);
 			continue;
 
-		case CD_IKELIFETIME:	/* --ikelifetime <seconds> */
+		case CD_IKE_LIFETIME:	/* --ike-lifetime <seconds> */
 			optarg_to_deltatime(&msg.sa_ike_life_seconds, &timescale_seconds);
 			continue;
 
-		case CD_IPSECLIFETIME:	/* --ipseclifetime <seconds> */
+		case CD_IPSEC_LIFETIME:	/* --ipsec-lifetime <seconds> */
 			optarg_to_deltatime(&msg.sa_ipsec_life_seconds, &timescale_seconds);
+			continue;
+
+		case CD_IPSEC_MAX_BYTES:	/* --ipsec-max-bytes <bytes> */
+			msg.sa_ipsec_max_bytes = opt_whole; /* TODO accept K/M/G/T etc */
+			continue;
+
+		case CD_IPSEC_MAX_PACKETS:	/* --ipsec-max-packets <packets> */
+			msg.sa_ipsec_max_packets = opt_whole; /* TODO accept K/M/G/T etc */
 			continue;
 
 		case CD_REKEYMARGIN:	/* --rekeymargin <seconds> */
@@ -1922,14 +1924,14 @@ int main(int argc, char **argv)
 			msg.sa_keying_tries = opt_whole;
 			continue;
 
-		case CD_REPLAY_W: /* --replay-window <num> */
+		case CD_REPLAY_WINDOW: /* --replay-window <num> */
 			/*
-			 * ??? what values are legitimate?
-			 * 32 and often 64, but what else?
-			 * Not so large that the
-			 * number of bits overflows uint32_t.
+			 * Upper bound is determined by the kernel.
+			 * Pluto will check against this when
+			 * processing the message.  The value is
+			 * relatively small.
 			 */
-			msg.sa_replay_window = opt_whole;
+			optarg_to_uintmax(&msg.sa_replay_window);
 			continue;
 
 		case CD_SEND_CA:	/* --sendca */
@@ -2663,10 +2665,10 @@ int main(int argc, char **argv)
 		diagw("rekeymargin or rekeyfuzz values are so large that they cause overflow");
 
 	check_life_time(msg.sa_ike_life_seconds, IKE_SA_LIFETIME_MAXIMUM,
-			"ikelifetime", &msg);
+			"ike-lifetime", &msg);
 
 	check_life_time(msg.sa_ipsec_life_seconds, IPSEC_SA_LIFETIME_MAXIMUM,
-			"ipseclifetime", &msg);
+			"ipsec-lifetime", &msg);
 
 	switch (msg.ike_version) {
 	case IKEv1:
@@ -2745,7 +2747,7 @@ int main(int argc, char **argv)
 		exit(RC_WHACK_PROBLEM);
 	}
 
-	int sock = safe_socket(AF_UNIX, SOCK_STREAM, 0);
+	int sock = cloexec_socket(AF_UNIX, SOCK_STREAM, 0);
 	int exit_status = 0;
 	ssize_t len = wp.str_next - (unsigned char *)&msg;
 

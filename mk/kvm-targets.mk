@@ -56,23 +56,22 @@ KVM_PREFIX ?=
 KVM_PREFIXES ?= $(if $(KVM_PREFIX), $(KVM_PREFIX), '')
 KVM_WORKERS ?= 1
 #KVM_WORKERS ?= $(shell awk 'BEGIN { c=1 } /cpu cores/ { c=$$4 } END { if (c>1) print c/2; }' /proc/cpuinfo)
-KVM_GROUP ?= qemu
 #KVM_PYTHON ?= PYTHONPATH=/home/python/pexpect:/home/python/ptyprocess /home/python/v3.8/bin/python3
 KVM_PIDFILE ?= kvmrunner.pid
+# Current user's UID; and GID used by QEMU
 KVM_UID ?= $(shell id -u)
-KVM_GID ?= $(shell id -g $(KVM_GROUP))
+KVM_GID ?= $(shell stat --format=%g $(KVM_HOST_QEMUDIR))
 
 KVM_TRANSMOGRIFY = \
 	sed \
-	-e 's;@@DOMAIN@@;$(KVM_DOMAIN);' \
-	-e 's;@@POOLDIR@@;$(KVM_POOLDIR);' \
 	-e 's;@@GATEWAY@@;$(KVM_GATEWAY_ADDRESS);' \
 	-e 's;@@POOLDIR@@;$(KVM_POOLDIR);' \
 	-e 's;@@SOURCEDIR@@;$(KVM_SOURCEDIR);' \
 	-e 's;@@LOCALDIR@@;$(KVM_LOCALDIR);' \
 	-e 's;@@TESTINGDIR@@;$(KVM_TESTINGDIR);' \
 	-e 's;@@USER@@;$(KVM_UID);' \
-	-e 's;@@GROUP@@;$(KVM_GID);'
+	-e 's;@@GROUP@@;$(KVM_GID);' \
+	-e 's;@@PREFIX@@;$(KVM_FIRST_PREFIX);'
 
 # The alternative is qemu:///session and it doesn't require root.
 # However, it has never been used, and the python tools all assume
@@ -89,35 +88,38 @@ VIRSH = sudo virsh --connect=$(KVM_CONNECTION)
 #
 # Makeflags passed to the KVM build
 #
+# Note that $($*) in KVM_MAKEFLAGS expands to DEBIAN, FEDORA, FREEBSD,
+# NETBSD, OPENBSD, ...  so that each platform has their own flags.
+# For instance:
+#
+#    KVM_$($*)_NSS_CFLAGS
+#
+# becomes:
+#
+#    KVM_FEDORA_NSS_CFLAGS KVM_FREEBSD_NSS_CFLAGS et.al.
 
-# Should these live in the OS.mk file?
-KVM_USE_EFENCE ?= true
-KVM_USE_NSS_IPSEC_PROFILE ?= true
-KVM_USE_NSS_KDF ?= true
 KVM_ALL_ALGS ?= false
-KVM_USE_SECCOMP ?= true
-KVM_USE_LABELED_IPSEC ?= true
-KVM_SD_RESTART_TYPE ?= no
-KVM_USE_FIPSCHECK ?= false
-KVM_FINALNSSDIR ?= $(FINALCONFDIR)/ipsec.d
-KVM_FEDORA_NSS_CFLAGS ?=
-KVM_FEDORA_NSS_LDFLAGS ?=
 
-KVM_MAKEFLAGS ?= -j$(shell expr $(KVM_WORKERS) + 1)
-KVM_FEDORA_MAKEFLAGS = \
-	USE_EFENCE=$(KVM_USE_EFENCE) \
-	ALL_ALGS=$(KVM_ALL_ALGS) \
-	USE_SECCOMP=$(KVM_USE_SECCOMP) \
-	USE_LABELED_IPSEC=$(KVM_USE_LABELED_IPSEC) \
-	USE_NSS_IPSEC_PROFILE=$(KVM_USE_NSS_IPSEC_PROFILE) \
-	SD_RESTART_TYPE=$(KVM_SD_RESTART_TYPE) \
-	USE_NSS_KDF=$(KVM_USE_NSS_KDF) \
-	FINALNSSDIR=$(KVM_FINALNSSDIR) \
-	USE_FIPSCHECK=$(KVM_USE_FIPSCHECK) \
-	$(if $(KVM_FEDORA_NSS_CFLAGS),NSS_CFLAGS="$(KVM_FEDORA_NSS_CFLAGS)") \
-	$(if $(KVM_FEDORA_NSS_LDFLAGS),NSS_LDFLAGS="$(KVM_FEDORA_NSS_LDFLAGS)") \
+# On Fedora, overide linux defaults
+KVM_FEDORA_FINALNSSDIR ?= $(FINALCONFDIR)/ipsec.d
+KVM_FEDORA_SD_RESTART_TYPE ?= no
+KVM_FEDORA_USE_EFENCE ?= true
+KVM_FEDORA_USE_LABELED_IPSEC ?= true
+KVM_FEDORA_USE_SECCOMP ?= true
+
+KVM_MAKEFLAGS ?= \
+	-j$(shell expr $(KVM_WORKERS) + 1) \
+	$(if $(KVM_ALL_ALGS),ALL_ALGS=$(KVM_ALL_ALGS)) \
+	$(if $(KVM_$($*)_FINALNSSDIR),FINALNSSDIR="$(KVM_$($*)_FINALNSSDIR)") \
+	$(if $(KVM_$($*)_NSS_CFLAGS),NSS_CFLAGS="$(KVM_$($*)_NSS_CFLAGS)") \
+	$(if $(KVM_$($*)_NSS_LDFLAGS),NSS_LDFLAGS="$(KVM_$($*)_NSS_LDFLAGS)") \
+	$(if $(KVM_$($*)_SD_RESTART_TYPE),SD_RESTART_TYPE="$(KVM_$($*)_SD_RESTART_TYPE)") \
+	$(if $(KVM_$($*)_USE_EFENCE),USE_EFENCE="$(KVM_$($*)_USE_EFENCE)") \
+	$(if $(KVM_$($*)_USE_LABELED_IPSEC),USE_LABELED_IPSEC="$(KVM_$($*)_USE_LABELED_IPSEC)") \
+	$(if $(KVM_$($*)_USE_LTO),USE_LTO="$(KVM_$($*)_USE_LTO)") \
+	$(if $(KVM_$($*)_USE_NSS_KDF),USE_NSS_KDF="$(KVM_$($*)_USE_NSS_KDF)") \
+	$(if $(KVM_$($*)_USE_SECCOMP),USE_SECCOMP="$(KVM_$($*)_USE_SECCOMP)") \
 	$(NULL)
-
 
 # Fine-tune the BASE and BUILD machines.
 #
@@ -138,7 +140,7 @@ KVM_FEDORA_MAKEFLAGS = \
 
 VIRT_INSTALL ?= sudo virt-install
 VIRT_CPU ?= --cpu=host-passthrough
-VIRT_DISK_SIZE_GB ?=8
+VIRT_DISK_SIZE_GB ?= 10
 VIRT_RND ?= --rng=type=random,device=/dev/random
 VIRT_SECURITY ?= --security=type=static,model=dac,label='$(KVM_UID):$(KVM_GID)',relabel=yes
 VIRT_GATEWAY ?= --network=network:$(KVM_GATEWAY),model=virtio
@@ -169,12 +171,13 @@ VIRT_INSTALL_FLAGS = \
 #     KVM_OPENBSD=
 # NOT ...=false
 
+KVM_DEBIAN ?=
 KVM_FEDORA ?= true
 KVM_FREEBSD ?=
 KVM_NETBSD ?=
 KVM_OPENBSD ?=
 
-# so that $($*) conversts % to upper case
+# so that $($*) converts % to upper case
 debian = DEBIAN
 fedora = FEDORA
 freebsd = FREEBSD
@@ -195,12 +198,19 @@ KVM_OS += $(if $(KVM_FREEBSD), freebsd)
 KVM_OS += $(if $(KVM_NETBSD),  netbsd)
 KVM_OS += $(if $(KVM_OPENBSD), openbsd)
 
+# fed into virt-install --os-variant
+KVM_DEBIAN_OS_VARIANT ?= $(shell osinfo-query os | awk '/debian[1-9]/ {print $$1}' | sort -V | tail -1)
+KVM_FEDORA_OS_VARIANT ?= $(shell osinfo-query os | awk '/fedora[1-9]/ {print $$1}' | sort -V | tail -1)
+KVM_FREEBSD_OS_VARIANT ?= $(shell osinfo-query os | awk '/freebsd[1-9]/ {print $$1}' | sort -V | tail -1)
+KVM_NETBSD_OS_VARIANT ?= $(shell osinfo-query os | awk '/netbsd[1-9]/ {print $$1}' | sort -V | tail -1)
+KVM_OPENBSD_OS_VARIANT ?= $(shell osinfo-query os | awk '/openbsd[1-9]/ {print $$1}' | sort -V | tail -1)
+
 #
 # Hosts
 #
 
 KVM_DEBIAN_HOST_NAMES = debiane debianw
-KVM_FEDORA_HOST_NAMES = east west north road nic
+KVM_FEDORA_HOST_NAMES = east west north road nic fipse fipsw
 KVM_FREEBSD_HOST_NAMES = freebsde freebsdw
 KVM_NETBSD_HOST_NAMES = netbsde netbsdw
 KVM_OPENBSD_HOST_NAMES = openbsde openbsdw
@@ -268,12 +278,13 @@ KVM_PLATFORM_DOMAIN_NAMES = $(KVM_PLATFORM_BUILD_DOMAIN_NAMES) $(KVM_PLATFORM_TE
 # Other utilities and directories
 #
 
+QEMU_IMG ?= sudo qemu-img
 KVMSH ?= $(KVM_PYTHON) testing/utils/kvmsh.py
 KVMRUNNER ?= $(KVM_PYTHON) testing/utils/kvmrunner.py
 KVMRESULTS ?= $(KVM_PYTHON) testing/utils/kvmresults.py
 KVMTEST ?= $(KVM_PYTHON) testing/utils/kvmtest.py
 
-RPM_VERSION = $(shell make --no-print-directory showrpmversion)
+RPM_VERSION = $(shell $(MAKE) --no-print-directory showrpmversion)
 RPM_PREFIX  = libreswan-$(RPM_VERSION)
 RPM_BUILD_CLEAN ?= --rmsource --rmspec --clean
 
@@ -336,9 +347,11 @@ $(KVM_HOST_QEMUDIR_OK): | $(KVM_POOLDIR)
 		echo ;							\
 		echo "  The directory:" ;				\
 		echo ;							\
-		echo "     $(shell ls -ld $(KVM_HOST_QEMUDIR))" ;	\
+		echo "     $(KVM_HOST_QEMUDIR) (KVM_HOST_QEMUDIR)" ;	\
 		echo ;							\
-		echo "  is not writeable." ;				\
+		echo "  is not writeable vis:" ;			\
+		echo ;							\
+		echo -n "     " ; ls -ld $(KVM_HOST_QEMUDIR) ;		\
 		echo ;							\
 		echo "  This will break virsh which is"	;		\
 		echo "  used to manipulate the domains." ;		\
@@ -685,70 +698,13 @@ $(KVM_LOCALDIR)/%.net: | $(KVM_LOCALDIR)
 .PHONY: kvm-networks kvm-gateway
 kvm-gateway: $(KVM_GATEWAY_FILE)
 kvm-networks: $(KVM_TEST_NETWORKS)
-.PHONY: kvm-purge-networks kvm-purge-gateway
-kvm-purge-networks:
+.PHONY: kvm-uninstall-networks kvm-uninstall-gateway
+kvm-uninstall-networks:
 	$(foreach network, $(KVM_TEST_NETWORKS), \
 		$(call destroy-kvm-network, $(network)))
-kvm-demolish-gateway:
+kvm-uninstall-gateway:
 	$(call destroy-kvm-network, $(KVM_GATEWAY_FILE))
 
-
-##
-##
-## Download all required ISOs
-##
-##
-
-# Note: Remember, $(basename) is counter intuitive - unlike UNIX
-# basename it doesn't strip the directory.
-
-.PHONY: kvm-iso
-
-KVM_FEDORA_ISO = $(KVM_POOLDIR)/$(notdir $(KVM_FEDORA_ISO_URL))
-kvm-iso: $(KVM_FEDORA_ISO)
-$(KVM_FEDORA_ISO): | $(KVM_POOLDIR)
-	wget --output-document $@.tmp --no-clobber -- $(KVM_FEDORA_ISO_URL)
-	mv $@.tmp $@
-
-# For FreeBSD, download the compressed ISO
-KVM_FREEBSD_ISO ?= $(KVM_POOLDIR)/$(notdir $(KVM_FREEBSD_ISO_URL))
-kvm-iso: $(KVM_FREEBSD_ISO)
-$(KVM_FREEBSD_ISO): | $(KVM_POOLDIR)
-	wget --output-document $@.xz --no-clobber -- $(KVM_FREEBSD_ISO_URL).xz
-	xz --uncompress --keep $@.xz
-
-# NetBSD requires a serial boot ISO (boot-com.iso) and an install ISO
-# (NetBSD-*.iso).
-KVM_NETBSD_INSTALL_ISO ?= $(KVM_POOLDIR)/$(notdir $(KVM_NETBSD_INSTALL_ISO_URL))
-KVM_NETBSD_BOOT_ISO ?= $(basename $(KVM_NETBSD_INSTALL_ISO))-boot.iso
-kvm-iso: $(KVM_NETBSD_BOOT_ISO)
-kvm-iso: $(KVM_NETBSD_INSTALL_ISO)
-$(KVM_NETBSD_INSTALL_ISO): | $(KVM_POOLDIR)
-	wget --output-document $@.tmp --no-clobber -- $(KVM_NETBSD_INSTALL_ISO_URL)
-	mv $@.tmp $@
-$(KVM_NETBSD_BOOT_ISO): | $(KVM_POOLDIR)
-	wget --output-document $@.tmp --no-clobber -- $(KVM_NETBSD_BOOT_ISO_URL)
-	mv $@.tmp $@
-
-# Give the OpenBSD ISO a meaningful name.
-KVM_OPENBSD_ISO = $(KVM_POOLDIR)/OpenBSD-$(notdir $(KVM_OPENBSD_ISO_URL))
-kvm-iso: $(KVM_OPENBSD_ISO)
-$(KVM_OPENBSD_ISO): | $(KVM_POOLDIR)
-	wget --output-document $@.tmp --no-clobber -- $(KVM_OPENBSD_ISO_URL)
-	mv $@.tmp $@
-
-##
-##
-## Utilities
-##
-##
-
-define clone-os-disk
-	: clone-os-disk
-	:    in=$(strip $(1))
-	:    out=$(strip $(2))
-	sudo qemu-img create -f qcow2 -F qcow2 -b $(1) $(2)
-endef
 
 ##
 ##
@@ -757,10 +713,10 @@ endef
 ##
 
 .PHONY: kvm-base
-kvm-base: $(patsubst %, kvm-%-base, $(KVM_OS))
+kvm-base: $(patsubst %, kvm-base-%, $(KVM_OS))
 
-$(patsubst %, kvm-%-base, $(KVM_PLATFORM)): \
-kvm-%-base:
+$(patsubst %, kvm-base-%, $(KVM_PLATFORM)): \
+kvm-base-%:
 	rm -f $(KVM_POOLDIR_PREFIX)$(*)-base
 	rm -f $(KVM_POOLDIR_PREFIX)$(*)-base.*
 	$(MAKE) $(KVM_POOLDIR_PREFIX)$(*)-base
@@ -781,7 +737,7 @@ $(KVM_POOLDIR_PREFIX)%-base: | \
 		$(VIRT_INSTALL) \
 			$(VIRT_INSTALL_FLAGS) \
 			--name=$(notdir $@) \
-			--os-variant=$(KVM_$($*)_VIRT_INSTALL_OS_VARIANT) \
+			$(if $(KVM_$($*)_OS_VARIANT), --os-variant=$(KVM_$($*)_OS_VARIANT)) \
 			--disk=path=$@.qcow2,size=$(VIRT_DISK_SIZE_GB),bus=virtio,format=qcow2 \
 			$(KVM_$($*)_VIRT_INSTALL_FLAGS)
 	:
@@ -818,10 +774,24 @@ $(KVM_POOLDIR_PREFIX)%-base: | \
 	$(KVMSH) --shutdown $(notdir $@)
 	touch $@
 
+
+.PHONY: kvm-iso
+
+#
 # Fedora
+#
+# - since kickstart is used this is pretty straight forward
+#
+
+KVM_FEDORA_ISO_URL ?= https://download.fedoraproject.org/pub/fedora/linux/releases/35/Server/x86_64/iso/Fedora-Server-dvd-x86_64-35-1.2.iso
+KVM_FEDORA_KICKSTART_FILE ?= testing/libvirt/fedora/base.ks
+KVM_FEDORA_ISO = $(KVM_POOLDIR)/$(notdir $(KVM_FEDORA_ISO_URL))
+kvm-iso: $(KVM_FEDORA_ISO)
+$(KVM_FEDORA_ISO): | $(KVM_POOLDIR)
+	wget --output-document $@.tmp --no-clobber -- $(KVM_FEDORA_ISO_URL)
+	mv $@.tmp $@
 
 KVM_FEDORA_BASE_DOMAIN = $(KVM_POOLDIR_PREFIX)fedora-base
-KVM_FEDORA_VIRT_INSTALL_OS_VARIANT ?= fedora30
 KVM_FEDORA_VIRT_INSTALL_FLAGS = \
 	--location=$(KVM_FEDORA_ISO) \
 	--initrd-inject=$(KVM_FEDORA_KICKSTART_FILE) \
@@ -830,10 +800,27 @@ KVM_FEDORA_VIRT_INSTALL_FLAGS = \
 $(KVM_FEDORA_BASE_DOMAIN): | $(KVM_FEDORA_ISO)
 $(KVM_FEDORA_BASE_DOMAIN): | $(KVM_FEDORA_KICKSTART_FILE)
 
-# FreeBSD uses a modified install CD
+
+#
+# FreeBSD
+#
+# - uses a modified install CD
+#
+
+KVM_FREEBSD_ISO_URL ?= https://download.freebsd.org/releases/amd64/amd64/ISO-IMAGES/13.0/FreeBSD-13.0-RELEASE-amd64-disc1.iso
+# 13.1 installer barfs with:
+# /usr/libexec/bsdinstall/script: 3: Bad file descriptor
+# See https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=266802
+KVM_FREEBSD_ISO_URL ?= https://download.freebsd.org/releases/amd64/amd64/ISO-IMAGES/13.1/FreeBSD-13.1-RELEASE-amd64-disc1.iso
+KVM_FREEBSD_ISO ?= $(KVM_POOLDIR)/$(notdir $(KVM_FREEBSD_ISO_URL))
+
+kvm-iso: $(KVM_FREEBSD_ISO)
+# For FreeBSD, download the compressed ISO
+$(KVM_FREEBSD_ISO): | $(KVM_POOLDIR)
+	wget --output-document $@.xz --no-clobber -- $(KVM_FREEBSD_ISO_URL).xz
+	xz --uncompress --keep $@.xz
 
 KVM_FREEBSD_BASE_DOMAIN = $(KVM_POOLDIR_PREFIX)freebsd-base
-KVM_FREEBSD_VIRT_INSTALL_OS_VARIANT ?= freebsd10.0
 KVM_FREEBSD_BASE_ISO = $(KVM_FREEBSD_BASE_DOMAIN).iso
 KVM_FREEBSD_VIRT_INSTALL_FLAGS = \
        --cdrom=$(KVM_FREEBSD_BASE_ISO)
@@ -854,10 +841,29 @@ $(KVM_FREEBSD_BASE_ISO): testing/libvirt/freebsd/base.conf
 		/etc/installerconfig=$(KVM_FREEBSD_BASE_DOMAIN).base.conf
 	mv $@.tmp $@
 
-# NetBSD, uses a serial console boot iso
+
+#
+# NetBSD
+#
+# - needs a second serial console boot iso
+#
+
+KVM_NETBSD_BOOT_ISO_URL ?= https://cdn.netbsd.org/pub/NetBSD/NetBSD-9.3/i386/installation/cdrom/boot-com.iso
+KVM_NETBSD_BOOT_ISO ?= $(basename $(KVM_NETBSD_INSTALL_ISO))-boot.iso
+
+KVM_NETBSD_INSTALL_ISO_URL ?= https://cdn.netbsd.org/pub/NetBSD/NetBSD-9.3/images/NetBSD-9.2-i386.iso
+KVM_NETBSD_INSTALL_ISO ?= $(KVM_POOLDIR)/$(notdir $(KVM_NETBSD_INSTALL_ISO_URL))
+
+kvm-iso: $(KVM_NETBSD_BOOT_ISO)
+kvm-iso: $(KVM_NETBSD_INSTALL_ISO)
+$(KVM_NETBSD_INSTALL_ISO): | $(KVM_POOLDIR)
+	wget --output-document $@.tmp --no-clobber -- $(KVM_NETBSD_INSTALL_ISO_URL)
+	mv $@.tmp $@
+$(KVM_NETBSD_BOOT_ISO): | $(KVM_POOLDIR)
+	wget --output-document $@.tmp --no-clobber -- $(KVM_NETBSD_BOOT_ISO_URL)
+	mv $@.tmp $@
 
 KVM_NETBSD_BASE_DOMAIN = $(KVM_POOLDIR_PREFIX)netbsd-base
-KVM_NETBSD_VIRT_INSTALL_OS_VARIANT ?= netbsd8.0
 KVM_NETBSD_BASE_ISO = $(KVM_NETBSD_BASE_DOMAIN).iso
 KVM_NETBSD_VIRT_INSTALL_FLAGS = \
 	--cdrom=$(KVM_NETBSD_BOOT_ISO) \
@@ -879,89 +885,108 @@ $(KVM_NETBSD_BASE_ISO): testing/libvirt/netbsd/base.sh
 		/base.sh=$(KVM_NETBSD_BASE_DOMAIN).base.sh
 	mv $@.tmp $@
 
-# OpenBSD needs to mangle the ISO
+
+#
+# OpenBSD
+#
+# - the downloaded ISO needs mangling
+# - sources are in separate tarballs
+#
+
+# Give the OpenBSD ISO a meaningful name.
+
+KVM_OPENBSD_URL ?= https://cdn.openbsd.org/pub/OpenBSD/7.1
+KVM_OPENBSD_ISO_URL ?= $(KVM_OPENBSD_URL)/amd64/install71.iso
+KVM_OPENBSD_SRC_URL += $(KVM_OPENBSD_URL)/src.tar.gz
+KVM_OPENBSD_SRC_URL += $(KVM_OPENBSD_URL)/sys.tar.gz
+# not openbsd... as gets deleted by rm openbsd.*
+KVM_OPENBSD_POOLPREFIX = $(KVM_POOLDIR)/OpenBSD-$(notdir $(KVM_OPENBSD_URL))
+KVM_OPENBSD_ISO = $(KVM_OPENBSD_POOLPREFIX)-install.iso
+KVM_OPENBSD_SRC_TGZ = $(addprefix $(KVM_OPENBSD_POOLPREFIX)-, $(notdir $(KVM_OPENBSD_SRC_URL)))
+
+kvm-iso: $(KVM_OPENBSD_ISO)
+$(KVM_OPENBSD_ISO): | $(KVM_POOLDIR)
+	wget --output-document $@.tmp --no-clobber -- $(KVM_OPENBSD_ISO_URL)
+	mv $@.tmp $@
+kvm-iso: $(KVM_OPENBSD_SRC_TGZ)
+$(KVM_OPENBSD_SRC_TGZ): \
+$(KVM_OPENBSD_POOLPREFIX)-%: | $(KVM_POOLDIR)
+	wget --output-document $@.tmp --no-clobber -- $(KVM_OPENBSD_URL)/$(*)
+	mv $@.tmp $@
 
 KVM_OPENBSD_BASE_DOMAIN = $(KVM_POOLDIR_PREFIX)openbsd-base
-KVM_OPENBSD_VIRT_INSTALL_OS_VARIANT ?= openbsd6.5
 KVM_OPENBSD_BASE_ISO = $(KVM_OPENBSD_BASE_DOMAIN).iso
 KVM_OPENBSD_VIRT_INSTALL_FLAGS = --cdrom=$(KVM_OPENBSD_BASE_ISO)
 
 $(KVM_OPENBSD_BASE_DOMAIN): | $(KVM_OPENBSD_BASE_ISO)
 
+kvm-iso: $(KVM_OPENBSD_BASE_ISO)
 $(KVM_OPENBSD_BASE_ISO): $(KVM_OPENBSD_ISO)
+$(KVM_OPENBSD_BASE_ISO): $(KVM_OPENBSD_SRC_TGZ)
 $(KVM_OPENBSD_BASE_ISO): testing/libvirt/openbsd/base.conf
 $(KVM_OPENBSD_BASE_ISO): testing/libvirt/openbsd/boot.conf
 $(KVM_OPENBSD_BASE_ISO): testing/libvirt/openbsd/base.sh
+$(KVM_OPENBSD_BASE_ISO): testing/libvirt/openbsd/base.disk
 	cp $(KVM_OPENBSD_ISO) $@.tmp
 	$(KVM_TRANSMOGRIFY) \
 		testing/libvirt/openbsd/base.sh \
 		> $(KVM_OPENBSD_BASE_DOMAIN).base.sh
+	: boot.conf sets up a serial console
+	: base.conf configures the installer
+	: base.sh gets run by base.py after boot
 	growisofs -M $@.tmp -l -R \
 		-input-charset utf-8 \
 		-graft-points \
 		/base.conf="testing/libvirt/openbsd/base.conf" \
 		/etc/boot.conf="testing/libvirt/openbsd/boot.conf" \
-		/base.sh=$(KVM_OPENBSD_BASE_DOMAIN).base.sh
+		/base.sh=$(KVM_OPENBSD_BASE_DOMAIN).base.sh \
+		/base.disk=testing/libvirt/openbsd/base.disk \
+		/src.tar.gz=$(KVM_OPENBSD_POOLPREFIX)-src.tar.gz \
+		/sys.tar.gz=$(KVM_OPENBSD_POOLPREFIX)-sys.tar.gz
 	mv $@.tmp $@
 
 
 ##
-## Create and update the base domain, installing missing packages.
+## Upgrade the base domain: create a clone, install any missing
+## packages and upgrade any packages that are out-of-date.
 ##
-## Repeated kvm-$(OS)-upgrade calls upgrade (not fresh install) the
-## domain.  Use kvm-$(OS)-downgrade to force this.
-##
-## At this point only /pool is accessible (/source and /testing are
-## not, see below).
-
-.PHONY: kvm-downgrade
-kvm-downgrade: $(patsubst %, kvm-%-downgrade, $(KVM_OS))
-
-$(patsubst %, kvm-%-downgrade, $(KVM_PLATFORM)): \
-kvm-%-downgrade:
-	rm -f $(KVM_POOLDIR_PREFIX)$(*)-upgrade
-	rm -f $(KVM_POOLDIR_PREFIX)$(*)-upgrade.*
-
-$(patsubst %, kvm-%-upgrade, $(KVM_PLATFORM)): \
-kvm-%-upgrade:
-	rm -f $(KVM_POOLDIR_PREFIX)$(*)-upgrade  # not .*
-	$(MAKE) $(KVM_POOLDIR_PREFIX)$(*)-upgrade
+## While the script is running only /pool, pointing into this repo, is
+## accessible (/source and /testing which may point elsewhere are not
+## accessable, see above and below).
 
 .PHONY: kvm-upgrade
-kvm-upgrade: $(patsubst %, kvm-%-upgrade, $(KVM_OS))
+kvm-upgrade: $(patsubst %, kvm-upgrade-%, $(KVM_OS))
 
-$(patsubst %, $(KVM_POOLDIR_PREFIX)%-upgrade.vm, $(KVM_PLATFORM)): \
-$(KVM_POOLDIR_PREFIX)%-upgrade.vm: $(KVM_POOLDIR_PREFIX)%-base \
-		testing/libvirt/%/install.sh \
-		| $(KVM_HOST_OK)
-	: creating domain ...-upgrade, not -upgrade.vm, hence basename
-	$(MAKE) kvm-undefine-$(basename $(notdir $@))
-	$(call clone-os-disk, $<.qcow2, $(basename $@).qcow2)
-	$(VIRT_INSTALL) \
-		$(VIRT_INSTALL_FLAGS) \
-		--name=$(notdir $(basename $@)) \
-		--os-variant=$(KVM_$($*)_VIRT_INSTALL_OS_VARIANT) \
-		--disk=cache=writeback,path=$(basename $@).qcow2 \
-		--import \
-		--noautoconsole
-	: install $(notdir $(basename $@)) using install.sh from $(srcdir) and not $(KVM_SOURCEDIR)
-	cp testing/libvirt/$*/install.sh $(KVM_POOLDIR)/$(KVM_FIRST_PREFIX)$*.install.sh
-	$(KVMSH) $(notdir $(basename $@)) -- /pool/$(KVM_FIRST_PREFIX)$*.install.sh $(KVM_$($*)_INSTALL_FLAGS)
-	: only shutdown when install works
-	$(KVMSH) --shutdown $(basename $(notdir $@))
-	touch $@
+$(patsubst %, kvm-upgrade-%, $(KVM_PLATFORM)): \
+kvm-upgrade-%:
+	rm -f $(KVM_POOLDIR_PREFIX)$(*)-upgrade
+	rm -f $(KVM_POOLDIR_PREFIX)$(*)-upgrade.*
+	$(MAKE) $(KVM_POOLDIR_PREFIX)$(*)-upgrade
 
 $(patsubst %, $(KVM_POOLDIR_PREFIX)%-upgrade, $(KVM_PLATFORM)): \
-$(KVM_POOLDIR_PREFIX)%-upgrade: $(KVM_POOLDIR_PREFIX)%-upgrade.vm \
+$(KVM_POOLDIR_PREFIX)%-upgrade: $(KVM_POOLDIR_PREFIX)%-base \
 		testing/libvirt/%/upgrade.sh \
 		| $(KVM_HOST_OK)
-	: upgrade $($*) using upgrade.sh from $(srcdir) and not $(KVM_SOURCEDIR)
-	cp testing/libvirt/$*/upgrade.sh $(KVM_POOLDIR)/$(KVM_FIRST_PREFIX)$*.upgrade.sh
-	$(KVMSH) $(notdir $@) -- /pool/$(KVM_FIRST_PREFIX)$*.upgrade.sh $(KVM_$($*)_UPGRADE_FLAGS)
+	$(MAKE) kvm-undefine-$(notdir $@)
+	$(QEMU_IMG) create -f qcow2 -F qcow2 -b $<.qcow2 $@.qcow2
+	$(VIRT_INSTALL) \
+		$(VIRT_INSTALL_FLAGS) \
+		--name=$(notdir $@) \
+		--os-variant=$(KVM_$($*)_OS_VARIANT) \
+		--disk=cache=writeback,path=$@.qcow2 \
+		--import \
+		--noautoconsole
+
+	: Copy/transmogrify upgrade.sh in this directory - $(srcdir) - to
+	: $(KVMPOOLDIR) where it can be run from within the VM.
+	: Do not use upgrade.sh from $(KVM_SOURCEDIR) which can be different
+	: and is only used for building pluto.
+	$(KVM_TRANSMOGRIFY) testing/libvirt/$*/upgrade.sh > $@.upgrade.sh
+	$(KVMSH) $(notdir $@) -- \
+		/bin/sh -x /pool/$(notdir $@).upgrade.sh $(KVM_$($*)_UPGRADE_FLAGS)
 	: only shutdown when upgrade works
 	$(KVMSH) --shutdown $(notdir $@)
 	touch $@
-
 
 ##
 ## Create the os domain by transmogrifying the updated domain.
@@ -972,10 +997,10 @@ $(KVM_POOLDIR_PREFIX)%-upgrade: $(KVM_POOLDIR_PREFIX)%-upgrade.vm \
 ## and not a full domain rebuild.
 
 .PHONY: kvm-transmogrify
-kvm-transmogrify: $(patsubst %, kvm-%-transmogrify, $(KVM_OS))
+kvm-transmogrify: $(patsubst %, kvm-transmogrify-%, $(KVM_OS))
 
-$(patsubst %, kvm-%-transmogrify, $(KVM_PLATFORM)): \
-kvm-%-transmogrify:
+$(patsubst %, kvm-transmogrify-%, $(KVM_PLATFORM)): \
+kvm-transmogrify-%:
 	rm -f $(KVM_POOLDIR_PREFIX)$(*)
 	rm -f $(KVM_POOLDIR_PREFIX)$(*).*
 	$(MAKE) $(KVM_POOLDIR_PREFIX)$(*)
@@ -986,53 +1011,81 @@ $(KVM_POOLDIR_PREFIX)%: $(KVM_POOLDIR_PREFIX)%-upgrade \
 		testing/libvirt/%/transmogrify.sh \
 		$(KVM_HOST_OK)
 	$(MAKE) kvm-undefine-$(notdir $@)
-	$(call clone-os-disk, $<.qcow2, $@.qcow2)
+	$(QEMU_IMG) create -f qcow2 -F qcow2 -b $<.qcow2 $@.qcow2
 	$(VIRT_INSTALL) \
 		$(VIRT_INSTALL_FLAGS) \
 		$(VIRT_SOURCEDIR) \
 		$(VIRT_TESTINGDIR) \
 		--name=$(notdir $@) \
-		--os-variant=$(KVM_$($*)_VIRT_INSTALL_OS_VARIANT) \
+		--os-variant=$(KVM_$($*)_OS_VARIANT) \
 		--disk=cache=writeback,path=$@.qcow2 \
 		--import \
 		--noautoconsole
-	: transmogrify $($*) using transmogrify.sh from
-	:   srcdir=$(srcdir)
-	: and not
-	:   KVM_SOURCEDIR=$(KVM_SOURCEDIR)
-	$(KVM_TRANSMOGRIFY) \
-		testing/libvirt/$*/transmogrify.sh \
-		> $(KVM_POOLDIR)/$(KVM_FIRST_PREFIX)$*.transmogrify.sh
+	: Copy/transmogrify transmogrify.sh in this directory - $(srcdir) - to
+	: $(KVMPOOLDIR) where it can be run from within the VM.
+	: Do not use upgrade.sh from $(KVM_SOURCEDIR) which can be different
+	: and is only used for building pluto.
+	$(KVM_TRANSMOGRIFY) testing/libvirt/$*/transmogrify.sh > $@.transmogrify.sh
+	for f in testing/libvirt/bash_profile $(KVM_$($*)_TRANSMOGRIFY_FILES); do \
+		cp -v $$f $@.$$(basename $$f) ; \
+	done
 	$(KVMSH) $(notdir $@) -- \
-		/bin/sh -x \
-		/pool/$(KVM_FIRST_PREFIX)$*.transmogrify.sh
-	: only shutdown when transmogrify succeeds
+		/bin/sh -x /pool/$(notdir $@).transmogrify.sh $(KVM_$($*)_TRANSMOGRIFY_FLAGS)
+	: only shutdown after transmogrify succeeds
 	$(KVMSH) --shutdown $(notdir $@)
 	touch $@
 
+KVM_FEDORA_TRANSMOGRIFY_FILES += $(wildcard testing/libvirt/fedora/network/*.network)
+KVM_FREEBSD_TRANSMOGRIFY_FILES += testing/libvirt/freebsd/rc.conf
+KVM_NETBSD_TRANSMOGRIFY_FILES += testing/libvirt/netbsd/rc.local
+KVM_OPENBSD_TRANSMOGRIFY_FILES += testing/libvirt/openbsd/rc.local
+
+
 ##
-## Install libreswan into the build.
+## Build/Install libreswan into the build domain.
 ##
 
-$(patsubst %, kvm-%-install, $(KVM_PLATFORM)): \
-kvm-%-install: $(KVM_POOLDIR_PREFIX)%
+# Notice how the <<gmake base>> and <<gmake install-base>> rules do
+# not shut down the domain.  That is left to the rule creating all the
+# test instances.
+
+# First delete all of the build domain's clones.  The build domain
+# won't boot when its clones are running.
+#
+# So that all the INSTALL domains are deleted before the build domain
+# is booted, this is done using a series of sub-makes (without this,
+# things barf because the build domain things its disk is in use).
+
+# some rules are overwritten below
+KVM_INSTALL_PLATFORM += $(filter-out fedora, $(KVM_PLATFORM))
+ifneq ($(KVM_INSTALL_RPM),true)
+KVM_INSTALL_PLATFORM += fedora
+endif
+
+.PHONY: kvm-build
+kvm-build: $(foreach os, $(KVM_OS), kvm-build-$(os))
+
+$(patsubst %, kvm-build-%, $(KVM_INSTALL_PLATFORM)): \
+kvm-build-%: $(KVM_POOLDIR_PREFIX)%
+	: $(MAKE) $(patsubst %, kvm-undefine-%, $(call add-kvm-prefixes, $(KVM_$($*)_HOST_NAMES)))
 	$(KVMSH) $(KVMSH_FLAGS) \
 		--chdir /source \
 		$(notdir $<) \
 		-- \
 		gmake install-base $(KVM_MAKEFLAGS) $(KVM_$($*)_MAKEFLAGS)
-	$(KVMSH) --shutdown $(notdir $<)
+
+
+.PHONY: kvm-install
+kvm-install: $(foreach os, $(KVM_OS), kvm-install-$(os))
+	$(MAKE) $(KVM_KEYS)
 
 $(patsubst %, kvm-install-%, $(KVM_PLATFORM)): \
 kvm-install-%:
 	$(MAKE) $(patsubst %, kvm-undefine-%, $(call add-kvm-prefixes, $(KVM_$($*)_HOST_NAMES)))
-	$(MAKE) kvm-$*-install
+	$(MAKE) kvm-build-$*
+	$(KVMSH) --shutdown $(KVM_FIRST_PREFIX)$*
 	$(MAKE) $(call add-kvm-localdir-prefixes, $(KVM_$($*)_HOST_NAMES))
 
-$(patsubst %, kvm-uninstall-%, $(KVM_PLATFORM)): \
-kvm-uninstall-%:
-	$(MAKE) $(patsubst %, kvm-undefine-%, $(call add-kvm-prefixes, $(KVM_$($*)_HOST_NAMES)))
-	$(MAKE) kvm-undefine-$(KVM_FIRST_PREFIX)$*
 
 #
 # Create the local domains
@@ -1052,15 +1105,9 @@ define define-clone-domain
 		testing/libvirt/vm/$(strip $(2)).xml
 	: install-kvm-test-domain prefix=$(strip $(1)) host=$(strip $(2)) template=$(strip $(3))
 	$$(MAKE) kvm-undefine-$$(notdir $$@)
-	$(call clone-os-disk, $(addprefix $(3), .qcow2), $$@.qcow2)
-	sed \
+	$$(QEMU_IMG) create -f qcow2 -F qcow2 -b $(strip $(3)).qcow2 $$@.qcow2
+	$$(KVM_TRANSMOGRIFY) \
 		-e "s:@@NAME@@:$$(notdir $$@):" \
-		-e "s:@@TESTINGDIR@@:$$(KVM_TESTINGDIR):" \
-		-e "s:@@SOURCEDIR@@:$$(KVM_SOURCEDIR):" \
-		-e "s:@@POOLDIR@@:$$(KVM_POOLDIR):" \
-		-e "s:@@LOCALDIR@@:$$(KVM_LOCALDIR):" \
-		-e "s:@@USER@@:$$(KVM_UID):" \
-		-e "s:@@GROUP@@:$$(KVM_GID):" \
 		-e "s:network='192_:network='$(addprefix $(notdir $(1)), 192_):" \
 		< testing/libvirt/vm/$(strip $(2)).xml \
 		> '$$@.tmp'
@@ -1104,45 +1151,69 @@ kvm-shutdown: $(patsubst %, kvm-shutdown-%, $(KVM_PLATFORM_DOMAIN_NAMES))
 .PHONY: kvm-undefine
 $(patsubst %, kvm-undefine-%, $(KVM_PLATFORM_DOMAIN_NAMES)): \
 kvm-undefine-%:
-	case "$$($(VIRSH) domstate $*)" in \
-	"running" | "in shutdown" | "paused" ) \
-		$(VIRSH) destroy $* ; \
-		$(VIRSH) undefine $* \
-		;; \
-	"shut off" ) \
-		$(VIRSH) undefine $* \
-		;; \
-	"" ) ;; \
-	esac
+	@if state=$$($(VIRSH) domstate $* 2>&1); then \
+		case "$${state}" in \
+		"running" | "in shutdown" | "paused" ) \
+			echo -n "destroying $*: " ; $(VIRSH) destroy $* ; \
+			echo -n "undefining $*: " ; $(VIRSH) undefine $* \
+			;; \
+		"shut off" ) \
+			echo -n "undefining $*: " ; $(VIRSH) undefine $* \
+			;; \
+		* ) \
+			echo "Unknown state $${state} for $*" ; \
+			;; \
+		esac ; \
+	else \
+		echo "No domain $*" ; \
+	fi
 	rm -f $(KVM_POOLDIR)/$*       $(KVM_LOCALDIR)/$*
 	rm -f $(KVM_POOLDIR)/$*.qcow2 $(KVM_LOCALDIR)/$*.qcow2
-	rm -f $(KVM_POOLDIR)/$*.vm    $(KVM_LOCALDIR)/$*.vm
 kvm-undefine: $(patsubst %, kvm-undefine-%, $(KVM_PLATFORM_DOMAIN_NAMES))
-
-.PHONY: kvm-define
-kvm-define: $(addprefix $(KVM_POOLDIR)/,$(KVM_PLATFORM_BUILD_DOMAIN_NAMES))
-kvm-define: $(addprefix $(KVM_LOCALDIR)/,$(KVM_PLATFORM_TEST_DOMAIN_NAMES))
-
-.PHONY: kvm-uninstall
-kvm-uninstall: $(patsubst %, kvm-uninstall-%, $(KVM_OS))
 
 .PHONY: kvm-clean
 kvm-clean: kvm-uninstall
 kvm-clean: kvm-clean-keys
 kvm-clean: kvm-clean-check
-	rm -rf $(patsubst %, OBJ.*.%/, $(KVM_PLATFORM))
-	rm -rf OBJ.*.swanbase
+	rm -rf OBJ.kvm.*
 
 .PHONY: kvm-purge
 kvm-purge: kvm-clean
-kvm-purge: kvm-purge-networks
-kvm-purge: $(patsubst %, kvm-undefine-$(KVM_FIRST_PREFIX)%-upgrade, $(KVM_OS))
+kvm-purge: kvm-uninstall-networks
+kvm-purge: kvm-downgrade
 	rm -f $(KVM_HOST_OK)
 
+.PHONY: kvm-uninstall
+kvm-uninstall: $(patsubst %, kvm-uninstall-%, $(KVM_OS))
+
+$(patsubst %, kvm-uninstall-%, $(KVM_PLATFORM)): \
+kvm-uninstall-%:
+	$(MAKE) $(patsubst %, kvm-undefine-%, $(call add-kvm-prefixes, $(KVM_$($*)_HOST_NAMES)))
+	$(MAKE) kvm-undefine-$(KVM_FIRST_PREFIX)$*
+	rm -f $(KVM_POOLDIR_PREFIX)$*
+	rm -f $(KVM_POOLDIR_PREFIX)$*.*
+
+.PHONY: kvm-downgrade
+kvm-downgrade: $(foreach os, $(KVM_OS), kvm-downgrade-$(os))
+
+$(patsubst %, kvm-downgrade-%, $(KVM_PLATFORM)): \
+kvm-downgrade-%:
+	$(MAKE) kvm-uninstall-$*
+	$(MAKE) kvm-undefine-$(KVM_FIRST_PREFIX)$*-upgrade
+	rm -f $(KVM_POOLDIR_PREFIX)$*-upgrade
+	rm -f $(KVM_POOLDIR_PREFIX)$*-upgrade.*
+
 .PHONY: kvm-demolish
-kvm-demolish: kvm-purge
-kvm-demolish: $(patsubst %, kvm-undefine-$(KVM_FIRST_PREFIX)%-base, $(KVM_OS))
-kvm-demolish: kvm-demolish-gateway
+kvm-demolish: kvm-uninstall-gateway
+kvm-demolish: $(foreach os, $(KVM_OS), kvm-demolish-$(os))
+
+$(patsubst %, kvm-demolish-%, $(KVM_PLATFORM)): \
+kvm-demolish-%:
+	$(MAKE) kvm-downgrade-$*
+	$(MAKE) kvm-undefine-$(KVM_FIRST_PREFIX)$*-base
+	rm -f $(KVM_POOLDIR_PREFIX)$*-base
+	rm -f $(KVM_POOLDIR_PREFIX)$*-base.*
+
 
 #
 # Create an RPM for the test domains
@@ -1176,37 +1247,15 @@ kvm-rpm: $(KVM_POOLDIR_PREFIX)fedora
 			-ba $(RPM_BUILD_CLEAN) \
 			rpmbuild/SPECS/libreswan-testing.spec
 
-.PHONY: kvm-install-rpm
-kvm-install-rpm: $(KVM_POOLDIR_PREFIX)fedora
+ifeq ($(KVM_INSTALL_RPM), true)
+.PHONY: kvm-fedora-install
+kvm-fedora-install: $(KVM_POOLDIR_PREFIX)fedora
 	rm -fr rpmbuild/*RPMS
 	$(MAKE) kvm-rpm
 	$(KVMSH) $(KVMSH_FLAGS) --chdir . $(notdir $<) 'rpm -aq | grep libreswan && rpm -e $$(rpm -aq | grep libreswan) || true'
 	$(KVMSH) $(KVMSH_FLAGS) --chdir . $(notdir $<) 'rpm -i /source/rpmbuild/RPMS/x86_64/libreswan*rpm'
 	$(KVMSH) $(KVMSH_FLAGS) --chdir . $(notdir $<) 'restorecon /usr/local/sbin /usr/local/libexec/ipsec -Rv'
-	$(KVMSH) --shutdown $(KVM_KEYS_DOMAIN)
-
-#
-# kvm-install target
-#
-# First delete all of the build domain's clones.  The build domain
-# won't boot when its clones are running.
-#
-# So that all the INSTALL domains are deleted before the build domain
-# is booted, this is done using a series of sub-makes (without this,
-# things barf because the build domain things its disk is in use).
-
-KVM_INSTALL_TARGETS += $(foreach os, $(filter-out fedora openbsd, $(KVM_OS)), kvm-install-$(os))
-ifeq ($(KVM_INSTALL_RPM), true)
-KVM_INSTALL_TARGETS += kvm-install-rpm
-else
-KVM_INSTALL_TARGETS += kvm-install-fedora
 endif
-
-.PHONY: kvm-install
-kvm-install:
-	$(MAKE) $(KVM_INSTALL_TARGETS)
-	$(MAKE) $(KVM_KEYS)
-
 
 #
 # kvmsh-HOST
@@ -1225,12 +1274,6 @@ kvmsh-%: $(KVM_LOCALDIR)/% | $(KVM_HOST_OK)
 $(patsubst %, kvmsh-%, $(KVM_BUILD_DOMAIN_NAMES)) : \
 kvmsh-%: $(KVM_POOLDIR)/% | $(KVM_HOST_OK)
 	$(KVMSH) $(KVMSH_FLAGS) $* $(KVMSH_COMMAND)
-
-.PHONY: kvmsh-base
-kvmsh-base: kvmsh-$(KVM_FIRST_PREFIX)fedora-base
-
-.PHONY: kvmsh-build
-kvmsh-build: kvmsh-$(KVM_FIRST_PREFIX)fedora
 
 
 #
@@ -1298,6 +1341,12 @@ Configuration:
     $(call kvm-var-value,KVM_FREEBSD_HOST_NAMES)
     $(call kvm-var-value,KVM_NETBSD_HOST_NAMES)
     $(call kvm-var-value,KVM_OPENBSD_HOST_NAMES)
+
+    $(call kvm-var-value,KVM_DEBIAN_OS_VARIANT)
+    $(call kvm-var-value,KVM_FEDORA_OS_VARIANT)
+    $(call kvm-var-value,KVM_FREEBSD_OS_VARIANT)
+    $(call kvm-var-value,KVM_NETBSD_OS_VARIANT)
+    $(call kvm-var-value,KVM_OPENBSD_OS_VARIANT)
 
     $(call kvm-var-value,KVM_TEST_HOST_NAMES)
     $(call kvm-var-value,KVM_TEST_DOMAIN_NAMES)
@@ -1401,7 +1450,7 @@ Standard targets and operations:
   Delete the installed KVMs and networks so that the next kvm-install
   will create new versions:
 
-    kvm-purge:
+    kvm-downgrade:
         - delete test domains
 	- delete test build
         - delete test results
@@ -1412,7 +1461,6 @@ Standard targets and operations:
 
   Manipulating and accessing (logging into) domains:
 
-    kvmsh-build
     kvmsh-HOST ($(filter-out build, $(KVM_TEST_HOST_NAMES)))
         - use 'virsh console' to login to the given domain
 	- for HOST login to the first domain vis:

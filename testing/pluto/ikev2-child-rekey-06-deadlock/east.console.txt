@@ -15,7 +15,7 @@ east #
 000 "east":   our auth:secret, their auth:secret, our autheap:none, their autheap:none;
 000 "east":   modecfg info: us:none, them:none, modecfg policy:push, dns:unset, domains:unset, cat:unset;
 000 "east":   sec_label:unset;
-000 "east":   ike_life: 28800s; ipsec_life: 28800s; replay_window: 128; rekey_margin: 540s; rekey_fuzz: 100%; keyingtries: 0;
+000 "east":   ike_life: 28800s; ipsec_life: 28800s; ipsec_max_bytes: 2^63B; ipsec_max_packets: 2^63; replay_window: 128; rekey_margin: 540s; rekey_fuzz: 100%; keyingtries: 0;
 000 "east":   retransmit-interval: 9999ms; retransmit-timeout: 99s; iketcp:no; iketcp-port:4500;
 000 "east":   initial-contact:no; cisco-unity:no; fake-strongswan:no; send-vendorid:no; send-no-esp-tfc:no;
 000 "east":   policy: IKEv2+PSK+ENCRYPT+TUNNEL+PFS+IKE_FRAG_ALLOW+ESN_NO+ESN_YES;
@@ -25,7 +25,7 @@ east #
 000 "east":   our idtype: ID_FQDN; our id=@east; their idtype: ID_FQDN; their id=@west
 000 "east":   liveness: passive; dpdaction:hold; dpddelay:0s; retransmit-timeout:15s
 000 "east":   nat-traversal: encaps:auto; keepalive:20s
-000 "east":   newest ISAKMP SA: #0; newest IPsec SA: #0; conn serial: $1;
+000 "east":   newest IKE SA: #0; newest IPsec SA: #0; conn serial: $1;
 east #
  ipsec whack --impair revival
 east #
@@ -35,8 +35,8 @@ east #
 initdone
 east #
  ipsec whack --trafficstatus
-006 #3: "east", type=ESP, add_time=1234567890, inBytes=0, outBytes=0, id='@west'
-006 #4: "east", type=ESP, add_time=1234567890, inBytes=0, outBytes=0, id='@west'
+006 #3: "east", type=ESP, add_time=1234567890, inBytes=0, outBytes=0, maxBytes=2^63B, id='@west'
+006 #4: "east", type=ESP, add_time=1234567890, inBytes=0, outBytes=0, maxBytes=2^63B, id='@west'
 east #
  # policies and state should be multiple
 east #

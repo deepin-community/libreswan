@@ -1,0 +1,17 @@
+/testing/guestbin/swan-prep --46
+east #
+ ipsec start
+Redirecting to: [initsystem]
+east #
+ ../../guestbin/wait-until-pluto-started
+east #
+ ipsec auto --add 6in6
+002 "6in6": added IKEv2 connection
+east #
+ echo "initdone"
+initdone
+east #
+ ipsec whack --trafficstatus
+006 #2: "6in6", type=ESP, add_time=1234567890, inBytes=104, outBytes=104, maxBytes=2^63B, id='@east'
+east #
+ 

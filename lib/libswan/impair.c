@@ -188,6 +188,8 @@ struct impairment impairments[] = {
 	  .how_enum_names = &ikev2_exchange_names),
 	V("unknown-v2-payload-critical", unknown_v2_payload_critical,
 	  "include the unknown payload in the encrypted SK payload"),
+	V("ignore-soft-expire", ignore_soft_expire, "ignore kernel soft expire events"),
+	V("ignore-hard-expire", ignore_hard_expire, "ignore kernel hard expire events"),
 
 	V("force-v2-auth-method", force_v2_auth_method,
 	  "force the use of the specified IKEv2 AUTH method",
@@ -208,6 +210,26 @@ struct impairment impairments[] = {
 	  "trigger the liveness event", "SA"),
 	A("event-sa-replace", STATE_EVENT_HANDLER, EVENT_SA_REPLACE,
 	  "trigger the replace event", "SA"),
+
+	V("v1_remote_quick_id", v1_remote_quick_id, "set the remote quick ID",
+	  .unsigned_help = "value to set quick id too"),
+
+	V("v1_isakmp_delete_payload", v1_isakmp_delete_payload,
+	  "corrupt outgoing ISAKMP delete payload",
+	  .how_keywords = &impair_emit_keywords),
+
+	V("v1_ipsec_delete_payload", v1_ipsec_delete_payload,
+	  "corrupt outgoing IPsec delete payload",
+	  .how_keywords = &impair_emit_keywords),
+
+#define U(VALUE, HELP, ...) \
+	{ .what = #VALUE, .action = CALL_IMPAIR_UPDATE, .value = &impair.VALUE, .help = HELP, .sizeof_value = sizeof(impair.VALUE), .unsigned_help = "<unsigned>", ##__VA_ARGS__, }
+
+	U(v2_delete_protoid, "corrupt the IKEv2 Delete protocol ID"),
+	U(v2n_rekey_sa_protoid, "corrupt the IKEv2 REKEY CHILD notify protocol ID"),
+	U(v2_proposal_protoid, "corrupt the IKEv2 proposal substructure protocol ID"),
+
+#undef U
 
 #undef V
 #undef A
@@ -266,12 +288,18 @@ static unsigned parse_biased_unsigned(shunk_t string, const struct impairment *c
 {
 	unsigned bias = cr->how_keywords != NULL ? cr->how_keywords->nr_values : 1;
 	uintmax_t u;
-	err_t err = shunk_to_uintmax(string, NULL, 0/*base*/, &u, UINTMAX_MAX - bias/*ceiling*/);
-	if (err == NULL) {
-		return u + bias;
-	} else {
+	err_t err = shunk_to_uintmax(string, NULL, 0/*base*/, &u);
+	/*
+	 * Since, after bias, value must be non-zero, this acts as an
+	 * error flag.
+	 */
+	if (err != NULL) {
 		return 0;
 	}
+	if (u > UINTMAX_MAX - bias) {
+		return 0; /* i.e., u+bias overflows */
+	}
+	return u + bias;
 }
 
 #define IMPAIR_DISABLE (elemsof(impairments) + 0)

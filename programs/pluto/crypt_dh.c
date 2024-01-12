@@ -102,10 +102,10 @@ struct dh_local_secret *calc_dh_local_secret(const struct dh_desc *group, struct
 	return secret;
 }
 
-chunk_t clone_dh_local_secret_ke(struct dh_local_secret *local_secret)
+shunk_t dh_local_secret_ke(struct dh_local_secret *local_secret)
 {
-	return local_secret->group->dh_ops->clone_local_secret_ke(local_secret->group,
-								  local_secret->pubk);
+	return local_secret->group->dh_ops->local_secret_ke(local_secret->group,
+							    local_secret->pubk);
 }
 
 const struct dh_desc *dh_local_secret_desc(struct dh_local_secret *local_secret)
@@ -215,5 +215,5 @@ void submit_dh_shared_secret(struct state *task_st,
 	task->local_secret = dh_local_secret_addref(dh_st->st_dh_local_secret, HERE);
 	task->dh_serialno = dh_st->st_serialno;
 	task->cb = cb;
-	submit_task(dh_st->st_logger, task_st, task, &dh_shared_secret_handler, "DH shared secret");
+	submit_task(dh_st->st_logger, task_st, task, &dh_shared_secret_handler, where);
 }

@@ -27,47 +27,10 @@
 #include "ike_alg_hash.h"
 #include "ike_alg_prf.h"
 #include "ike_alg_integ.h"
-#include "ike_alg_hash_ops.h"
 #include "ike_alg_prf_mac_ops.h"
 #include "ike_alg_prf_ikev1_ops.h"
 #include "ike_alg_prf_ikev2_ops.h"
 #include "lsw-pfkeyv2.h"	/* for SADB_*ALG_* */
-
-static const uint8_t asn1_pkcs1_1_5_rsa_sha1_blob[1+ASN1_PKCS1_1_5_RSA_SIZE] = {
-	ASN1_PKCS1_1_5_RSA_SIZE,
-	ASN1_PKCS1_1_5_RSA_SHA1_BLOB
-};
-static const uint8_t asn1_ecdsa_sha1_blob[1+ASN1_ECDSA_SHA1_SIZE] = {
-	ASN1_ECDSA_SHA1_SIZE,
-	ASN1_ECDSA_SHA1_BLOB
-};
-
-const struct hash_desc ike_alg_hash_sha1 = {
-	.common = {
-		.fqn = "SHA1",
-		.names = "sha,sha1",
-		.algo_type = IKE_ALG_HASH,
-		.id = {
-			[IKEv1_OAKLEY_ID] = OAKLEY_SHA1,
-			[IKEv1_ESP_ID] = -1,
-			[IKEv2_ALG_ID] = IKEv2_HASH_ALGORITHM_SHA1,
-		},
-		.fips = true,
-	},
-	.nss = {
-		.oid_tag = SEC_OID_SHA1,
-		.derivation_mechanism = CKM_SHA1_KEY_DERIVATION,
-		.pkcs1_1_5_rsa_oid_tag = SEC_OID_PKCS1_SHA1_WITH_RSA_ENCRYPTION,
-	},
-	.hash_digest_size = SHA1_DIGEST_SIZE,
-	.hash_block_size = 64,	/* B from RFC 2104 */
-	.hash_ops = &ike_alg_hash_nss_ops,
-
-	.digital_signature_blob = {
-		[DIGITAL_SIGNATURE_PKCS1_1_5_RSA_BLOB] = THING_AS_HUNK(asn1_pkcs1_1_5_rsa_sha1_blob),
-		[DIGITAL_SIGNATURE_ECDSA_BLOB] = THING_AS_HUNK(asn1_ecdsa_sha1_blob),
-	},
-};
 
 const struct prf_desc ike_alg_prf_sha1 = {
 	.common = {
@@ -79,7 +42,7 @@ const struct prf_desc ike_alg_prf_sha1 = {
 			[IKEv1_ESP_ID] = -1,
 			[IKEv2_ALG_ID] = IKEv2_PRF_HMAC_SHA1,
 		},
-		.fips = true,
+		.fips.approved = true,
 	},
 	.nss = {
 		.mechanism = CKM_SHA_1_HMAC,
@@ -107,16 +70,16 @@ const struct integ_desc ike_alg_integ_sha1 = {
 			[IKEv1_OAKLEY_ID] = OAKLEY_SHA1,
 			[IKEv1_ESP_ID] = AUTH_ALGORITHM_HMAC_SHA1,
 			[IKEv2_ALG_ID] = IKEv2_INTEG_HMAC_SHA1_96,
+#ifdef SADB_AALG_SHA1HMAC
+			[SADB_ALG_ID] = SADB_AALG_SHA1HMAC,
+#endif
 		},
-		.fips = true,
+		.fips.approved = true,
 	},
 	.integ_keymat_size = SHA1_DIGEST_SIZE,
 	.integ_output_size = SHA1_DIGEST_SIZE_96,
 	.integ_ikev1_ah_transform = AH_SHA,
 	.prf = &ike_alg_prf_sha1,
-#ifdef SADB_AALG_SHA1HMAC
-	.integ_sadb_aalg_id = SADB_AALG_SHA1HMAC,
-#endif
 	.integ_netlink_xfrm_name = "sha1",
 	.integ_tcpdump_name = "sha1",
 	.integ_ike_audit_name = "sha1",

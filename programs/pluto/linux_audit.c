@@ -88,7 +88,7 @@ void linux_audit_init(int do_audit, struct logger *logger)
 			return;
 		} else {
 			fatal_errno(PLUTO_EXIT_AUDIT_FAIL, logger, errno,
-				    "FATAL: audit_open() failed");
+				    "audit_open() failed");
 		}
 	} else {
 		if (do_audit)
@@ -107,7 +107,7 @@ static void linux_audit(const int type, const char *message, const char *laddr, 
 	audit_fd = audit_open();
 	if (audit_fd < 0) {
 		fatal_errno(PLUTO_EXIT_AUDIT_FAIL, logger, errno,
-			    "FATAL: audit_open() failed");
+			    "audit_open() failed");
 	}
 
 	/*
@@ -128,7 +128,7 @@ static void linux_audit(const int type, const char *message, const char *laddr, 
 	close(audit_fd);
 	if (rc < 0) {
 		fatal_errno(PLUTO_EXIT_AUDIT_FAIL, logger, errno,
-			    "FATAL: audit log failed");
+			    "audit log failed");
 	}
 }
 
@@ -273,14 +273,14 @@ void linux_audit_conn(const struct state *st, enum linux_audit_kind op)
 
 		/* note: each arg appears twice because it is printed two ways */
 		jam(&buf, " in-spi=%" PRIu32 "(0x%08" PRIu32 ") out-spi=%" PRIu32 "(0x%08" PRIu32 ") in-ipcomp=%" PRIu32 "(0x%08" PRIu32 ") out-ipcomp=%" PRIu32 "(0x%08" PRIu32 ")",
-		    ntohl(pi->attrs.spi),
-		    ntohl(pi->attrs.spi),
-		    ntohl(pi->our_spi),
-		    ntohl(pi->our_spi),
-		    ntohl(st->st_ipcomp.attrs.spi),	/* zero if missing */
-		    ntohl(st->st_ipcomp.attrs.spi),	/* zero if missing */
-		    ntohl(st->st_ipcomp.our_spi),	/* zero if missing */
-		    ntohl(st->st_ipcomp.our_spi));	/* zero if missing */
+		    ntohl(pi->outbound.spi),
+		    ntohl(pi->outbound.spi),
+		    ntohl(pi->inbound.spi),
+		    ntohl(pi->inbound.spi),
+		    ntohl(st->st_ipcomp.outbound.spi),	/* zero if missing */
+		    ntohl(st->st_ipcomp.outbound.spi),	/* zero if missing */
+		    ntohl(st->st_ipcomp.inbound.spi),	/* zero if missing */
+		    ntohl(st->st_ipcomp.inbound.spi));	/* zero if missing */
 		break;
 	}
 	default:

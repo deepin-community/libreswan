@@ -40,6 +40,7 @@
 #include "ip_info.h"
 #include "hunk.h"		/* for char_is_space() */
 #include "ip_cidr.h"
+#include "ttodata.h"
 
 #include "ipsecconf/confread.h"
 #include "ipsecconf/starterlog.h"
@@ -85,7 +86,9 @@ static void ipsecconf_default_values(struct starter_config *cfg)
 	SOPT(KBF_IKEBUF, IKE_BUF_AUTO);
 	SOPT(KBF_IKE_ERRQUEUE, true);
 	SOPT(KBF_NFLOG_ALL, 0); /* disabled per default */
+#ifdef XFRM_LIFETIME_DEFAULT
 	SOPT(KBF_XFRMLIFETIME, XFRM_LIFETIME_DEFAULT); /* not used by pluto itself */
+#endif
 	SOPT(KBF_NHELPERS, -1); /* see also plutomain.c */
 
 	SOPT(KBF_KEEPALIVE, 0);                  /* config setup */
@@ -155,15 +158,17 @@ static void ipsecconf_default_values(struct starter_config *cfg)
 	DOPT(KNCF_XAUTHFAIL, XAUTHFAIL_HARD);
 
 	DOPT(KNCF_NIC_OFFLOAD, yna_auto);
-	DOPT(KNCF_IKELIFETIME_MS, IKE_SA_LIFETIME_DEFAULT * 1000);
+	DOPT(KNCF_IKE_LIFETIME_MS, IKE_SA_LIFETIME_DEFAULT * 1000);
 
 	DOPT(KNCF_REPLAY_WINDOW, IPSEC_SA_DEFAULT_REPLAY_WINDOW);
 
 	DOPT(KNCF_RETRANSMIT_TIMEOUT_MS, RETRANSMIT_TIMEOUT_DEFAULT * 1000);
 	DOPT(KNCF_RETRANSMIT_INTERVAL_MS, RETRANSMIT_INTERVAL_DEFAULT_MS);
 
-	DOPT(KNCF_SALIFETIME_MS, IPSEC_SA_LIFETIME_DEFAULT * 1000);
+	DOPT(KNCF_IPSEC_LIFETIME_MS, IPSEC_SA_LIFETIME_DEFAULT * 1000);
 	DOPT(KNCF_REKEYMARGIN_MS, SA_REPLACEMENT_MARGIN_DEFAULT * 1000);
+	DOPT(KNCF_IPSEC_MAXBYTES, IPSEC_SA_MAX_OPERATIONS);
+	DOPT(KNCF_IPSEC_MAXPACKETS, IPSEC_SA_MAX_OPERATIONS);
 	DOPT(KNCF_REKEYFUZZ, SA_REPLACEMENT_FUZZ_DEFAULT);
 
 	DOPT(KNCF_KEYINGTRIES, SA_REPLACEMENT_RETRIES_DEFAULT);
@@ -353,6 +358,8 @@ static bool load_setup(struct starter_config *cfg,
 		case kt_number:
 		case kt_time:
 		case kt_percent:
+		case kt_binary:
+		case kt_byte:
 			/* all treated as a number for now */
 			assert(f < elemsof(cfg->setup.options));
 			cfg->setup.options[f] = kw->number;
@@ -360,7 +367,7 @@ static bool load_setup(struct starter_config *cfg,
 			break;
 
 		case kt_bitstring:
-		case kt_rsasigkey:
+		case kt_pubkey:
 		case kt_ipaddr:
 		case kt_subnet:
 		case kt_range:
@@ -594,10 +601,28 @@ static bool validate_end(struct starter_conn *conn_st,
 		}
 	}
 
-	if (end->options_set[KSCF_RSASIGKEY]) {
-		end->rsasigkey_type = end->options[KSCF_RSASIGKEY];
+	static const struct {
+		enum ipseckey_algorithm_type alg;
+		enum keyword_string_conn_field kscf;
+		const char *name;
+	} keys[] = {
+		{ .alg = IPSECKEY_ALGORITHM_RSA, KSCF_RSASIGKEY, "rsasigkey", },
+		{ .alg = IPSECKEY_ALGORITHM_ECDSA, KSCF_ECDSAKEY, "ecdsakey", },
+		{ .alg = IPSECKEY_ALGORITHM_X_PUBKEY, KSCF_PUBKEY, "pubkey", },
+	};
 
-		switch (end->options[KSCF_RSASIGKEY]) {
+	FOR_EACH_ELEMENT(key, keys) {
+		if (!end->options_set[key->kscf]) {
+			continue;
+		}
+		if (end->pubkey != NULL) {
+			ERR_FOUND("duplicate public key");
+		}
+
+		end->pubkey_type = end->options[key->kscf];
+		end->pubkey_alg = key->alg;
+
+		switch (end->options[key->kscf]) {
 		case PUBKEY_DNSONDEMAND:
 			end->key_from_DNS_on_demand = true;
 			break;
@@ -605,10 +630,10 @@ static bool validate_end(struct starter_conn *conn_st,
 		default:
 			end->key_from_DNS_on_demand = false;
 			/* validate the KSCF_RSASIGKEY1/RSASIGKEY2 */
-			if (end->strings[KSCF_RSASIGKEY] != NULL) {
-				char *value = end->strings[KSCF_RSASIGKEY];
-				pfreeany(end->rsasigkey);
-				end->rsasigkey = clone_str(value, "end->rsasigkey");
+			if (end->strings[key->kscf] != NULL) {
+				char *value = end->strings[key->kscf];
+				pfreeany(end->pubkey);
+				end->pubkey = clone_str(value, "end->pubkey");
 			}
 		}
 	}
@@ -843,7 +868,7 @@ static bool translate_field(struct starter_conn *conn,
 		(*set_strings)[field] = true;
 		break;
 
-	case kt_rsasigkey:
+	case kt_pubkey:
 	case kt_loose_enum:
 		assert(field <= KSCF_last_loose);
 
@@ -892,6 +917,8 @@ static bool translate_field(struct starter_conn *conn,
 	case kt_number:
 	case kt_time:
 	case kt_percent:
+	case kt_binary:
+	case kt_byte:
 		/* all treated as a number for now */
 		assert(opt_floor <= field && field < opt_roof);
 
@@ -1640,7 +1667,7 @@ static void copy_conn_default(struct starter_conn *conn,
 
 	STR_FIELD_END(iface);
 	STR_FIELD_END(id);
-	STR_FIELD_END(rsasigkey);
+	STR_FIELD_END(pubkey);
 	STR_FIELD_END(virt);
 	STR_FIELD_END(certx);
 	STR_FIELD_END(ckaid);
@@ -1817,7 +1844,7 @@ static void confread_free_conn(struct starter_conn *conn)
 
 	STR_FIELD_END(iface);
 	STR_FIELD_END(id);
-	STR_FIELD_END(rsasigkey);
+	STR_FIELD_END(pubkey);
 	STR_FIELD_END(virt);
 	STR_FIELD_END(certx);
 	STR_FIELD_END(ckaid);

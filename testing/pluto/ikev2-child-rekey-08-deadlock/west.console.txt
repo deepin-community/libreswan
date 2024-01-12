@@ -26,9 +26,9 @@ west #
 000 "west-east/3x0": queuing pending IPsec SA negotiating with 192.1.2.23 IKE SA #1 "west-east/4x0"
 000 "west-east/2x0": queuing pending IPsec SA negotiating with 192.1.2.23 IKE SA #1 "west-east/4x0"
 000 "west-east/1x0": queuing pending IPsec SA negotiating with 192.1.2.23 IKE SA #1 "west-east/4x0"
-1v2 "west-east/4x0" #1: sent IKE_SA_INIT request
+1v2 "west-east/4x0" #1: sent IKE_SA_INIT request to 192.1.2.23:500
 1v2 "west-east/4x0" #1: sent IKE_AUTH request {cipher=AES_GCM_16_256 integ=n/a prf=HMAC_SHA2_512 group=MODP2048}
-003 "west-east/4x0" #1: initiator established IKE SA; authenticated using authby=secret and peer ID_FQDN '@east'
+003 "west-east/4x0" #1: initiator established IKE SA; authenticated peer using authby=secret and ID_FQDN '@east'
 004 "west-east/1x0" #2: initiator established Child SA using #1; IPsec tunnel [192.0.1.254-192.0.1.254:0-65535 0] -> [192.0.2.254-192.0.2.254:0-65535 0] {ESP/ESN=>0xESPESP <0xESPESP xfrm=AES_GCM_16_256-NONE DPD=passive}
 1v2 "west-east/2x0" #3: sent IPsec Child req wait response
 004 "west-east/2x0" #3: initiator established Child SA using #1; IPsec tunnel [192.0.1.253-192.0.1.253:0-65535 0] -> [192.0.2.254-192.0.2.254:0-65535 0] {ESP/ESN=>0xESPESP <0xESPESP xfrm=AES_GCM_16_256-NONE DPD=passive}
@@ -290,10 +290,10 @@ west #
 done
 west #
  ipsec whack --trafficstatus
-006 #6: "west-east/1x0", type=ESP, add_time=1234567890, inBytes=0, outBytes=0, id='@east'
-006 #7: "west-east/2x0", type=ESP, add_time=1234567890, inBytes=0, outBytes=0, id='@east'
-006 #8: "west-east/3x0", type=ESP, add_time=1234567890, inBytes=0, outBytes=0, id='@east'
-006 #9: "west-east/4x0", type=ESP, add_time=1234567890, inBytes=0, outBytes=0, id='@east'
+006 #6: "west-east/1x0", type=ESP, add_time=1234567890, inBytes=0, outBytes=0, maxBytes=2^63B, id='@east'
+006 #7: "west-east/2x0", type=ESP, add_time=1234567890, inBytes=0, outBytes=0, maxBytes=2^63B, id='@east'
+006 #8: "west-east/3x0", type=ESP, add_time=1234567890, inBytes=0, outBytes=0, maxBytes=2^63B, id='@east'
+006 #9: "west-east/4x0", type=ESP, add_time=1234567890, inBytes=0, outBytes=0, maxBytes=2^63B, id='@east'
 west #
  # policies and state should be multiple
 west #

@@ -25,10 +25,10 @@ west #
 west #
  ipsec auto --up labeled
 1v2 "labeled" #1: initiating IKEv2 connection
-1v2 "labeled" #1: sent IKE_SA_INIT request
+1v2 "labeled" #1: sent IKE_SA_INIT request to 192.1.2.23:500
 002 "labeled" #1: omitting CHILD SA payloads
 1v2 "labeled" #1: sent IKE_AUTH request {cipher=AES_GCM_16_256 integ=n/a prf=HMAC_SHA2_512 group=MODP2048}
-003 "labeled" #1: initiator established IKE SA; authenticated using RSASSA-PSS with SHA2_512 and preloaded certificate '@east'
+003 "labeled" #1: initiator established IKE SA; authenticated peer '2nnn-bit RSASSA-PSS with SHA2_512' digital signature using preloaded certificate '@east'
 west #
  # expect policy but no states
 west #
@@ -53,7 +53,13 @@ src 192.1.2.45/32 dst 192.1.2.23/32
 		proto esp reqid REQID mode tunnel
 XFRM done
 IPSEC mangle TABLES
-NEW_IPSEC_CONN mangle TABLES
+iptables filter TABLE
+Chain INPUT (policy ACCEPT)
+target     prot opt source               destination         
+Chain FORWARD (policy ACCEPT)
+target     prot opt source               destination         
+Chain OUTPUT (policy ACCEPT)
+target     prot opt source               destination         
 ROUTING TABLES
 default via 192.1.2.254 dev eth1
 192.0.1.0/24 dev eth0 proto kernel scope link src 192.0.1.254
@@ -88,7 +94,7 @@ libnsock nsock_iod_delete(): nsock_iod_delete (IOD #1)
 libnsock nsock_iod_delete(): nsock_iod_delete (IOD #2)
 west #
  ../../guestbin/wait-for.sh --match 'labeled..2.' ipsec trafficstatus
-006 #3: "labeled"[2] 192.1.2.23, type=ESP, add_time=1234567890, inBytes=164, outBytes=0, id='@east'
+006 #3: "labeled"[2] 192.1.2.23, type=ESP, add_time=1234567890, inBytes=164, outBytes=0, maxBytes=2^63B, id='@east'
 west #
  # no shunts; two transports; two x two states
 west #
@@ -99,9 +105,9 @@ west #
  ipsec showstates
 000 #1: "labeled":500 STATE_V2_ESTABLISHED_IKE_SA (established IKE SA); REKEY in XXs; REPLACE in XXs; newest; idle;
 000 #2: "labeled"[1] 192.1.2.23:500 STATE_V2_ESTABLISHED_CHILD_SA (established Child SA); REKEY in XXs; REPLACE in XXs; newest; IKE SA #1; idle;
-000 #2: "labeled"[1] 192.1.2.23 esp.ESPSPIi@192.1.2.23 esp.ESPSPIi@192.1.2.45 tun.0@192.1.2.23 tun.0@192.1.2.45 Traffic: ESPin=0B ESPout=273B ESPmax=0B 
+000 #2: "labeled"[1] 192.1.2.23 esp.ESPSPIi@192.1.2.23 esp.ESPSPIi@192.1.2.45 tun.0@192.1.2.23 tun.0@192.1.2.45 Traffic: ESPin=0B ESPout=273B ESPmax=2^63B 
 000 #3: "labeled"[2] 192.1.2.23:500 STATE_V2_ESTABLISHED_CHILD_SA (established Child SA); REKEY in XXs; REPLACE in XXs; newest; IKE SA #1; idle;
-000 #3: "labeled"[2] 192.1.2.23 esp.ESPSPIi@192.1.2.23 esp.ESPSPIi@192.1.2.45 tun.0@192.1.2.23 tun.0@192.1.2.45 Traffic: ESPin=164B ESPout=0B ESPmax=0B 
+000 #3: "labeled"[2] 192.1.2.23 esp.ESPSPIi@192.1.2.23 esp.ESPSPIi@192.1.2.45 tun.0@192.1.2.23 tun.0@192.1.2.45 Traffic: ESPin=164B ESPout=0B ESPmax=2^63B 
 west #
  ../../guestbin/ipsec-look.sh
 west NOW
@@ -160,7 +166,13 @@ src 192.1.2.45/32 dst 192.1.2.23/32
 		proto esp reqid REQID mode tunnel
 XFRM done
 IPSEC mangle TABLES
-NEW_IPSEC_CONN mangle TABLES
+iptables filter TABLE
+Chain INPUT (policy ACCEPT)
+target     prot opt source               destination         
+Chain FORWARD (policy ACCEPT)
+target     prot opt source               destination         
+Chain OUTPUT (policy ACCEPT)
+target     prot opt source               destination         
 ROUTING TABLES
 default via 192.1.2.254 dev eth1
 192.0.1.0/24 dev eth0 proto kernel scope link src 192.0.1.254
@@ -200,7 +212,7 @@ libnsock nsock_iod_delete(): nsock_iod_delete (IOD #1)
 libnsock nsock_iod_delete(): nsock_iod_delete (IOD #2)
 west #
  ../../guestbin/wait-for.sh --match 'labeled..3.' ipsec trafficstatus
-006 #4: "labeled"[3] 192.1.2.23, type=ESP, add_time=1234567890, inBytes=377, outBytes=429, id='@east'
+006 #4: "labeled"[3] 192.1.2.23, type=ESP, add_time=1234567890, inBytes=377, outBytes=429, maxBytes=2^63B, id='@east'
 west #
  # there should be no shunts
 west #
@@ -211,11 +223,11 @@ west #
  ipsec showstates
 000 #1: "labeled":500 STATE_V2_ESTABLISHED_IKE_SA (established IKE SA); REKEY in XXs; REPLACE in XXs; newest; idle;
 000 #2: "labeled"[1] 192.1.2.23:500 STATE_V2_ESTABLISHED_CHILD_SA (established Child SA); REKEY in XXs; REPLACE in XXs; newest; IKE SA #1; idle;
-000 #2: "labeled"[1] 192.1.2.23 esp.ESPSPIi@192.1.2.23 esp.ESPSPIi@192.1.2.45 tun.0@192.1.2.23 tun.0@192.1.2.45 Traffic: ESPin=0B ESPout=273B ESPmax=0B 
+000 #2: "labeled"[1] 192.1.2.23 esp.ESPSPIi@192.1.2.23 esp.ESPSPIi@192.1.2.45 tun.0@192.1.2.23 tun.0@192.1.2.45 Traffic: ESPin=0B ESPout=273B ESPmax=2^63B 
 000 #3: "labeled"[2] 192.1.2.23:500 STATE_V2_ESTABLISHED_CHILD_SA (established Child SA); REKEY in XXs; REPLACE in XXs; newest; IKE SA #1; idle;
-000 #3: "labeled"[2] 192.1.2.23 esp.ESPSPIi@192.1.2.23 esp.ESPSPIi@192.1.2.45 tun.0@192.1.2.23 tun.0@192.1.2.45 Traffic: ESPin=164B ESPout=0B ESPmax=0B 
+000 #3: "labeled"[2] 192.1.2.23 esp.ESPSPIi@192.1.2.23 esp.ESPSPIi@192.1.2.45 tun.0@192.1.2.23 tun.0@192.1.2.45 Traffic: ESPin=164B ESPout=0B ESPmax=2^63B 
 000 #4: "labeled"[3] 192.1.2.23:500 STATE_V2_ESTABLISHED_CHILD_SA (established Child SA); REKEY in XXs; REPLACE in XXs; newest; IKE SA #1; idle;
-000 #4: "labeled"[3] 192.1.2.23 esp.ESPSPIi@192.1.2.23 esp.ESPSPIi@192.1.2.45 tun.0@192.1.2.23 tun.0@192.1.2.45 Traffic: ESPin=377B ESPout=429B ESPmax=0B 
+000 #4: "labeled"[3] 192.1.2.23 esp.ESPSPIi@192.1.2.23 esp.ESPSPIi@192.1.2.45 tun.0@192.1.2.23 tun.0@192.1.2.45 Traffic: ESPin=377B ESPout=429B ESPmax=2^63B 
 west #
  ../../guestbin/ipsec-look.sh
 west NOW
@@ -292,7 +304,13 @@ src 192.1.2.45/32 dst 192.1.2.23/32
 		proto esp reqid REQID mode tunnel
 XFRM done
 IPSEC mangle TABLES
-NEW_IPSEC_CONN mangle TABLES
+iptables filter TABLE
+Chain INPUT (policy ACCEPT)
+target     prot opt source               destination         
+Chain FORWARD (policy ACCEPT)
+target     prot opt source               destination         
+Chain OUTPUT (policy ACCEPT)
+target     prot opt source               destination         
 ROUTING TABLES
 default via 192.1.2.254 dev eth1
 192.0.1.0/24 dev eth0 proto kernel scope link src 192.0.1.254
@@ -413,7 +431,13 @@ src 192.1.2.45/32 dst 192.1.2.23/32
 		proto esp reqid REQID mode tunnel
 XFRM done
 IPSEC mangle TABLES
-NEW_IPSEC_CONN mangle TABLES
+iptables filter TABLE
+Chain INPUT (policy ACCEPT)
+target     prot opt source               destination         
+Chain FORWARD (policy ACCEPT)
+target     prot opt source               destination         
+Chain OUTPUT (policy ACCEPT)
+target     prot opt source               destination         
 ROUTING TABLES
 default via 192.1.2.254 dev eth1
 192.0.1.0/24 dev eth0 proto kernel scope link src 192.0.1.254

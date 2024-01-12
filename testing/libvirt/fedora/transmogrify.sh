@@ -1,13 +1,24 @@
 #!/bin/sh
 
+set -xe ; exec < /dev/null
+
 GATEWAY=@@GATEWAY@@
 POOLDIR=@@POOLDIR@@
 SOURCEDIR=@@SOURCEDIR@@
 TESTINGDIR=@@TESTINGDIR@@
+PREFIX=@@PREFIX@@
+
+echo GATEWAY=${GATEWAY}
+echo POOLDIR=${POOLDIR}
+echo SOURCEDIR=${SOURCEDIR}
+echo TESTINGDIR=${TESTINGDIR}
+
 
 title()
 {
-    printf "\n\n$*\n\n"
+    :
+    : $*
+    :
 }
 
 run()
@@ -15,7 +26,6 @@ run()
     title "$@"
     "$@"
 }
-
 
 title mount /source and /testing
 
@@ -26,6 +36,7 @@ for mount in source testing ; do
 ${mount} /${mount} 9p defaults,trans=virtio,version=9p2000.L,context=system_u:object_r:usr_t:s0,x-systemd.automount 0 0
 EOF
     mkdir /${mount}
+    # XXX: broken; should copy from /pool or during install
     mount /${mount}
 done
 
@@ -57,7 +68,7 @@ systemctl enable systemd-networkd-wait-online.service
 systemctl disable systemd-resolved
 systemctl disable NetworkManager
 
-cp -v /testing/baseconfigs/all/etc/systemd/network/* /etc/systemd/network
+cp -v /pool/${PREFIX}fedora.*.network /etc/systemd/network/
 restorecon -R /etc/systemd/network
 
 
@@ -169,6 +180,10 @@ title bind
 
 # and bind config - can be run on all hosts (to prevent network DNS
 # packets) as well as on nic
+#
+# XXX: are these config files are tied to the test run and hence
+# should be copied over during the install or swan-pref step?
+
 mkdir -p /etc/bind
 cp -av /testing/baseconfigs/all/etc/bind/* /etc/bind/
 restorecon -R /etc/bind
@@ -180,6 +195,7 @@ mkdir -p /etc/ssh
 chown -v 755 /etc/ssh
 mkdir -p /root/.ssh
 chown -v 700 /root/.ssh
+# XXX: copy from /pool or copy during install? or drop?
 cp -av /testing/baseconfigs/all/etc/ssh/*key* /etc/ssh/
 cp -av /testing/baseconfigs/all/root/.ssh/* /root/.ssh/
 chmod -v 600 /etc/ssh/*key* /root/.ssh/*
@@ -190,40 +206,29 @@ echo "MaxAuthTries 32" >> /etc/ssh/sshd_config
 restorecon -R /root/.ssh /etc/ssh
 
 
-title replace root/.bashrc
+title replace root/.bash_profile
 
-cat <<EOF > /root/.bashrc
-# don't flood output with bracket characters
-bind 'set enable-bracketed-paste off'
-# simple path
-PATH=/bin:/sbin:/usr/local/bin:/usr/local/sbin:/testing/guestbin
-# editor
-export EDITOR=vim
-# git stuff
-export GIT_PS1_SHOWDIRTYSTATE=true
-alias git-log-p='git log --pretty=format:"%h %ad%x09%an%x09%s" --date=short'
-# stop systemd adding control characters
-export LC_CTYPE=C
-export SYSTEMD_COLOURS=false
-# don't wander into the weeds looking for debug info
-unset DEBUGINFOD_URLS
-EOF
+cp -v /pool/${PREFIX}fedora.bash_profile /root/.bash_profile
+
 
 title files mysteriously needed for systemd-networkd too
 
+# XXX: are these config files are tied to the test run and hence
+# should be copied over during the install or swan-pref step?
 for fname in /testing/baseconfigs/all/etc/sysconfig/* ; do
-    if test -f "${fname}"; then
-	cp -av "${fname}" /etc/sysconfig/
-    fi
+    cp -av "${fname}" /etc/sysconfig/
 done
 restorecon -R /etc/sysconfig/
 
 
 title fixup /etc/sysctl.conf
 
+# XXX: are these config files are tied to the test run and hence
+# should be copied over during the install or swan-pref step?
 cp -av /testing/baseconfigs/all/etc/sysctl.conf /etc/
-sysctl -q -p
+sysctl -q -p || true # expected to fail
 restorecon -R /etc/sysctl.conf
+sysctl -q -p || true # still expected to fail!
 
 
 title run unbound-keygen once

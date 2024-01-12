@@ -98,7 +98,7 @@ size_t jam_said(struct jambuf *buf, const ip_said *said)
 
 	if (proto == &ip_protocol_ipip/*TUN*/ &&
 	    said->spi == PASSTHROUGHSPI &&
-	    /* any zero */ thingeq(said->dst, unset_bytes)) {
+	    /* any zero */ thingeq(said->dst, unset_ip_bytes)) {
 		return jam_string(buf, (afi == &ipv4_info ? PASSTHROUGH4NAME :
 					afi == &ipv6_info ? PASSTHROUGH6NAME :
 					"<unknown-said-version>"));;
@@ -131,7 +131,17 @@ const struct ip_info *said_type(const ip_said *said)
 	}
 
 	/* may return NULL */
-	return ip_version_info(said->version);
+	return said_info(*said);
+}
+
+const struct ip_info *said_info(const ip_said said)
+{
+	if (!said.is_set) {
+		return NULL;
+	}
+
+	/* may return NULL */
+	return ip_version_info(said.version);
 }
 
 ip_address said_address(const ip_said said)

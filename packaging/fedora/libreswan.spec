@@ -30,7 +30,7 @@
 Name: libreswan
 Summary: Internet Key Exchange (IKEv1 and IKEv2) implementation for IPsec
 # version is generated in the release script
-Version: 4.7
+Version: 4.12
 Release: %{?prever:0.}1%{?prever:.%{prever}}%{?dist}
 License: GPLv2
 Url: https://libreswan.org/
@@ -45,20 +45,23 @@ BuildRequires: audit-libs-devel
 BuildRequires: bison
 BuildRequires: curl-devel
 BuildRequires: flex
-BuildRequires: gcc make
+BuildRequires: gcc
 BuildRequires: hostname
 BuildRequires: ldns-devel
 BuildRequires: libcap-ng-devel
 BuildRequires: libevent-devel
 BuildRequires: libseccomp-devel
 BuildRequires: libselinux-devel
+BuildRequires: make
 BuildRequires: nspr-devel
 BuildRequires: nss-devel >= %{nss_version}
 BuildRequires: nss-tools >= %{nss_version}
 BuildRequires: openldap-devel
 BuildRequires: pam-devel
 BuildRequires: pkgconfig
+BuildRequires: systemd
 BuildRequires: systemd-devel
+BuildRequires: systemd-rpm-macros
 BuildRequires: unbound-devel >= %{unbound_version}
 BuildRequires: xmlto
 %if 0%{with_efence}
@@ -100,27 +103,24 @@ Libreswan is based on Openswan-2.6.38 which in turn is based on FreeS/WAN-2.04
 sed -i "s:#[ ]*include \(.*\)\(/crypto-policies/back-ends/libreswan.config\)$:include \1\2:" configs/ipsec.conf.in
 
 %build
-make %{?_smp_mflags} \
+%make_build \
 %if 0%{with_development}
     OPTIMIZE_CFLAGS="%{?_hardened_cflags}" \
 %else
     OPTIMIZE_CFLAGS="%{optflags}" \
 %endif
-    WERROR_CFLAGS="-Werror -Wno-missing-field-initializers -Wno-lto-type-mismatch -Wno-maybe-uninitialized" \
 %if 0%{with_efence}
     USE_EFENCE=true \
 %endif
-    USERLINK="%{?__global_ldflags} -Wl,-z,relro -Wl,--as-needed  -Wl,-z,now -flto --no-lto" \
+    USERLINK="%{?__global_ldflags}" \
     %{libreswan_config} \
     programs
 FS=$(pwd)
 
 
 %install
-make \
-    DESTDIR=%{buildroot} \
+%make_install \
     %{libreswan_config} \
-    install
 FS=$(pwd)
 rm -rf %{buildroot}/usr/share/doc/libreswan
 rm -rf %{buildroot}%{_libexecdir}/ipsec/*check
@@ -199,5 +199,5 @@ certutil -N -d sql:$tmpdir --empty-password
 %doc %{_mandir}/*/*
 
 %changelog
-* Tue May 24 2022 Team Libreswan <team@libreswan.org> - 4.7-1
+* Tue Aug  8 2023 Team Libreswan <team@libreswan.org> - 4.12-1
 - Automated build from release tar ball

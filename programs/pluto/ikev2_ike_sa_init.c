@@ -56,6 +56,7 @@
 #include "ikev2_ipseckey.h"
 #include "pluto_stats.h"
 #include "ikev2_proposals.h"
+#include "ikev2_certreq.h"
 
 static ke_and_nonce_cb initiate_v2_IKE_SA_INIT_request_continue;	/* type assertion */
 static dh_shared_secret_cb process_v2_request_no_skeyseed_continue;	/* type assertion */
@@ -541,9 +542,9 @@ void initiate_v2_IKE_SA_INIT_request(struct connection *c,
 		    ike->sa.st_serialno, c->remote_tcpport);
 		update_endpoint_port(&ike->sa.st_remote_endpoint, ip_hport(c->remote_tcpport));
 		/* create new-from-old first; must addref */
-		struct iface_endpoint *p = open_tcp_endpoint(ike->sa.st_interface->ip_dev,
-							     ike->sa.st_remote_endpoint,
-							     ike->sa.st_logger);
+		struct iface_endpoint *p = connect_to_tcp_endpoint(ike->sa.st_interface->ip_dev,
+								   ike->sa.st_remote_endpoint,
+								   ike->sa.st_logger);
 		if (p == NULL) {
 			/* TCP: already logged? */
 			delete_state(&ike->sa);
@@ -576,6 +577,24 @@ void initiate_v2_IKE_SA_INIT_request(struct connection *c,
 	 */
 	enum stream log_stream = ((c->policy & POLICY_OPPORTUNISTIC) == LEMPTY) ? ALL_STREAMS : WHACK_STREAM;
 
+	/*
+	 * XXX: this is the first of two IKE_SA_INIT messages that are
+	 * logged when building and sending an IKE_SA_INIT request:
+	 *
+	 * 1. initiating IKEv2 connection
+	 *
+	 *    The state has been started and the first task has been
+	 *    off-loaded.  Since the connection is oriented, it is
+	 *    assumed that the peer's address has been resolved.
+	 *
+	 *    XXX: can the dns lookup be resolved here as part of the
+	 *    off load?
+	 *
+	 * 2. sending IKE_SA_INIT request ...
+	 *
+	 *    The message has been constructed and sent
+	 */
+
 	if (predecessor != NULL) {
 		const char *what;
 		if (IS_CHILD_SA_ESTABLISHED(predecessor)) {
@@ -607,8 +626,11 @@ void initiate_v2_IKE_SA_INIT_request(struct connection *c,
 
 	if (IS_LIBUNBOUND && id_ipseckey_allowed(ike, IKEv2_AUTH_RESERVED)) {
 		/*
-		 * This runs in the background?  How is it ever
+		 * This submits a background task?  How is it ever
 		 * synced?
+		 *
+		 * The value returned (the PUBKEY) is required during
+		 * IKE AUTH.
 		 */
 		if (!initiator_fetch_idr_ipseckey(ike)) {
 			llog_sa(RC_LOG_SERIOUS, ike,
@@ -634,8 +656,7 @@ void initiate_v2_IKE_SA_INIT_request(struct connection *c,
 	 * Calculate KE and Nonce.
 	 */
 	submit_ke_and_nonce(&ike->sa, ike->sa.st_oakley.ta_dh,
-			    initiate_v2_IKE_SA_INIT_request_continue,
-			    "initiate_v2_IKE_SA_INIT_request_continue KE");
+			    initiate_v2_IKE_SA_INIT_request_continue, HERE);
 	statetime_stop(&start, "%s()", __func__);
 }
 
@@ -971,10 +992,8 @@ stf_status process_v2_IKE_SA_INIT_request(struct ike_sa *ike,
 	}
 
 	/* calculate the nonce and the KE */
-	submit_ke_and_nonce(&ike->sa,
-			    ike->sa.st_oakley.ta_dh,
-			    process_v2_IKE_SA_INIT_request_continue,
-			    "process_v2_IKE_SA_INIT_request_continue");
+	submit_ke_and_nonce(&ike->sa, ike->sa.st_oakley.ta_dh,
+			    process_v2_IKE_SA_INIT_request_continue, HERE);
 	return STF_SUSPEND;
 }
 
@@ -1205,8 +1224,7 @@ static stf_status process_v2_IKE_SA_INIT_request_continue(struct state *ike_st,
 static stf_status resubmit_ke_and_nonce(struct ike_sa *ike)
 {
 	submit_ke_and_nonce(&ike->sa, ike->sa.st_oakley.ta_dh,
-			    initiate_v2_IKE_SA_INIT_request_continue,
-			    "rekey outI");
+			    initiate_v2_IKE_SA_INIT_request_continue, HERE);
 	return STF_SUSPEND;
 }
 
@@ -1525,6 +1543,13 @@ stf_status process_v2_IKE_SA_INIT_response_continue(struct state *ike_sa,
 	 * with SPIr.
 	 */
 	rehash_state(&ike->sa, &md->hdr.isa_ike_responder_spi);
+
+	/*
+	 * Parse any CERTREQ in the IKE_SA_INIT response so that it is
+	 * available to initiate_v2_IKE_AUTH_request() (possibly after
+	 * several IKE_INTERMEDIATE exchanges).
+	 */
+	process_v2CERTREQ_payload(ike, md);
 
 	/*
 	 * The IKE_SA_INIT response has been processed, now dispatch

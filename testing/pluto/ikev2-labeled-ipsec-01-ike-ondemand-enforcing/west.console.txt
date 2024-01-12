@@ -41,7 +41,13 @@ src 192.1.2.45/32 dst 192.1.2.23/32
 		proto esp reqid REQID mode transport
 XFRM done
 IPSEC mangle TABLES
-NEW_IPSEC_CONN mangle TABLES
+iptables filter TABLE
+Chain INPUT (policy ACCEPT)
+target     prot opt source               destination         
+Chain FORWARD (policy ACCEPT)
+target     prot opt source               destination         
+Chain OUTPUT (policy ACCEPT)
+target     prot opt source               destination         
 ROUTING TABLES
 default via 192.1.2.254 dev eth1
 192.0.1.0/24 dev eth0 proto kernel scope link src 192.0.1.254
@@ -57,7 +63,7 @@ west #
 fired and forgotten
 west #
  ../../guestbin/wait-for.sh --match 192.1.2.23 -- ipsec trafficstatus
-006 #2: "labeled"[1] 192.1.2.23, type=ESP, add_time=1234567890, inBytes=0, outBytes=0, id='@east'
+006 #2: "labeled"[1] 192.1.2.23, type=ESP, add_time=1234567890, inBytes=0, outBytes=0, maxBytes=2^63B, id='@east'
 west #
  ../../guestbin/ping-once.sh --runcon "system_u:system_r:ping_t:s0:c1.c256" --up     -I 192.1.2.45 192.1.2.23
 up
@@ -65,7 +71,7 @@ west #
  # there should be 1 tunnel in each direction
 west #
  ipsec trafficstatus
-006 #2: "labeled"[1] 192.1.2.23, type=ESP, add_time=1234567890, inBytes=64, outBytes=64, id='@east'
+006 #2: "labeled"[1] 192.1.2.23, type=ESP, add_time=1234567890, inBytes=64, outBytes=64, maxBytes=2^63B, id='@east'
 west #
  # there should be no bare shunts
 west #
@@ -122,7 +128,13 @@ src 192.1.2.45/32 dst 192.1.2.23/32
 		proto esp reqid REQID mode transport
 XFRM done
 IPSEC mangle TABLES
-NEW_IPSEC_CONN mangle TABLES
+iptables filter TABLE
+Chain INPUT (policy ACCEPT)
+target     prot opt source               destination         
+Chain FORWARD (policy ACCEPT)
+target     prot opt source               destination         
+Chain OUTPUT (policy ACCEPT)
+target     prot opt source               destination         
 ROUTING TABLES
 default via 192.1.2.254 dev eth1
 192.0.1.0/24 dev eth0 proto kernel scope link src 192.0.1.254

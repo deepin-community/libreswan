@@ -4,8 +4,7 @@ PKG_BASE ?= /usr/pkg
 PKG_DBDIR ?= /var/db/pkg
 PKG_PATH ?= /usr/pkgsrc/packages/All
 
-USERLAND_CFLAGS += -DHAS_SUN_LEN
-USERLAND_CFLAGS += -DNEED_SIN_LEN
+USERLAND_CFLAGS += -DUSE_SOCKADDR_LEN
 
 USERLAND_INCLUDES += -I$(PKG_BASE)/include
 
@@ -17,11 +16,14 @@ NSPR_LDFLAGS = -L$(PKG_BASE)/lib/nspr -Wl,-rpath,$(PKG_BASE)/lib/nspr -lnspr4
 
 CRYPT_LDFLAGS =
 
-USE_BSDKAME = true
+LIBEVENT_LDFLAGS = -levent -levent_pthreads
 USE_PFKEYV2 = true
 USE_LIBCAP_NG = false
 
 INITSYSTEM=rc.d
+
+USE_DNSSEC = true
+DEFAULT_DNSSEC_ROOTKEY_FILE = /usr/pkg/etc/unbound/root.key
 
 # not /run/pluto
 FINALRUNDIR=/var/run/pluto
@@ -30,3 +32,8 @@ FINALRUNDIR=/var/run/pluto
 FINALSYSCONFDIR=$(PREFIX)/etc
 FINALNSSDIR=$(PREFIX)/etc/ipsec.d
 FINALEXAMPECONFDIR=$(PREFIX)/share/examples/libreswan
+FINALMANDIR=$(PREFIX)/man
+
+# LTO seems either broken or confused
+USE_LTO ?= false
+

@@ -34,54 +34,6 @@
 
 /* SHA-2 256 */
 
-static const uint8_t asn1_pkcs1_1_5_rsa_sha2_256_blob[1+ASN1_PKCS1_1_5_RSA_SIZE] = {
-	ASN1_PKCS1_1_5_RSA_SIZE,
-	ASN1_PKCS1_1_5_RSA_SHA2_256_BLOB
-};
-static const uint8_t asn1_ecdsa_sha2_256_blob[1+ASN1_ECDSA_SHA2_SIZE] = {
-	ASN1_ECDSA_SHA2_SIZE,
-	ASN1_ECDSA_SHA2_256_BLOB
-};
-static const uint8_t asn1_rsassa_pss_sha2_256_blob[1+ASN1_RSASSA_PSS_SHA2_SIZE] = {
-	ASN1_RSASSA_PSS_SHA2_SIZE,
-	ASN1_RSASSA_PSS_SHA2_256_BLOB
-};
-
-const CK_RSA_PKCS_PSS_PARAMS rsa_pss_sha2_256 = {
-	.hashAlg = CKM_SHA256,
-	.mgf = CKG_MGF1_SHA256,
-	.sLen = SHA2_256_DIGEST_SIZE,
-};
-
-const struct hash_desc ike_alg_hash_sha2_256 = {
-	.common = {
-		.fqn = "SHA2_256",
-		.names = "sha2,sha256,sha2_256",
-		.algo_type = IKE_ALG_HASH,
-		.id = {
-			[IKEv1_OAKLEY_ID] = OAKLEY_SHA2_256,
-			[IKEv1_ESP_ID] = -1,
-			[IKEv2_ALG_ID] = IKEv2_HASH_ALGORITHM_SHA2_256,
-		},
-		.fips = true,
-	},
-	.nss = {
-		.oid_tag = SEC_OID_SHA256,
-		.derivation_mechanism = CKM_SHA256_KEY_DERIVATION,
-		.rsa_pkcs_pss_params = &rsa_pss_sha2_256,
-		.pkcs1_1_5_rsa_oid_tag = SEC_OID_PKCS1_SHA256_WITH_RSA_ENCRYPTION,
-	},
-	.hash_digest_size = SHA2_256_DIGEST_SIZE,
-	.hash_block_size = 64,	/* from RFC 4868 */
-	.hash_ops = &ike_alg_hash_nss_ops,
-
-	.digital_signature_blob = {
-		[DIGITAL_SIGNATURE_PKCS1_1_5_RSA_BLOB] = THING_AS_HUNK(asn1_pkcs1_1_5_rsa_sha2_256_blob),
-		[DIGITAL_SIGNATURE_ECDSA_BLOB] = THING_AS_HUNK(asn1_ecdsa_sha2_256_blob),
-		[DIGITAL_SIGNATURE_RSASSA_PSS_BLOB] = THING_AS_HUNK(asn1_rsassa_pss_sha2_256_blob),
-	},
-};
-
 const struct prf_desc ike_alg_prf_sha2_256 = {
 	.common = {
 		.fqn = "HMAC_SHA2_256",
@@ -92,7 +44,7 @@ const struct prf_desc ike_alg_prf_sha2_256 = {
 			[IKEv1_ESP_ID] = -1,
 			[IKEv2_ALG_ID] = IKEv2_PRF_HMAC_SHA2_256,
 		},
-		.fips = true,
+		.fips.approved = true,
 	},
 	.nss = {
 		.mechanism = CKM_SHA256_HMAC,
@@ -120,19 +72,19 @@ const struct integ_desc ike_alg_integ_sha2_256 = {
 			[IKEv1_OAKLEY_ID] = OAKLEY_SHA2_256,
 			[IKEv1_ESP_ID] = AUTH_ALGORITHM_HMAC_SHA2_256,
 			[IKEv2_ALG_ID] = IKEv2_INTEG_HMAC_SHA2_256_128,
+#ifdef SADB_X_AALG_SHA2_256HMAC
+			[SADB_ALG_ID] = SADB_X_AALG_SHA2_256HMAC,
+#endif
+#ifdef SADB_X_AALG_SHA2_256
+			[SADB_ALG_ID] = SADB_X_AALG_SHA2_256,
+#endif
 		},
-		.fips = true,
+		.fips.approved = true,
 	},
 	.integ_keymat_size = SHA2_256_DIGEST_SIZE,
 	.integ_output_size = SHA2_256_DIGEST_SIZE / 2,
 	.integ_ikev1_ah_transform = AH_SHA2_256,
 	.prf = &ike_alg_prf_sha2_256,
-#ifdef SADB_X_AALG_SHA2_256HMAC
-	.integ_sadb_aalg_id = SADB_X_AALG_SHA2_256HMAC,
-#endif
-#ifdef SADB_X_AALG_SHA2_256
-	.integ_sadb_aalg_id = SADB_X_AALG_SHA2_256,
-#endif
 	.integ_netlink_xfrm_name = "hmac(sha256)",
 	.integ_tcpdump_name = "sha256",
 	.integ_ike_audit_name = "sha256",
@@ -148,15 +100,15 @@ const struct integ_desc ike_alg_integ_hmac_sha2_256_truncbug = {
 			[IKEv1_OAKLEY_ID] = -1,
 			[IKEv1_ESP_ID] = AUTH_ALGORITHM_HMAC_SHA2_256_TRUNCBUG,
 			[IKEv2_ALG_ID] = -1,
+#ifdef SADB_X_AALG_SHA2_256HMAC_TRUNCBUG
+			[SADB_ALG_ID] = SADB_X_AALG_SHA2_256HMAC_TRUNCBUG,
+#endif
 		},
-		.fips = false,
+		.fips.approved = false,
 	},
 	.integ_keymat_size = SHA2_256_DIGEST_SIZE,
 	.integ_output_size = BYTES_FOR_BITS(96),
 	.integ_ikev1_ah_transform = AH_SHA2_256_TRUNCBUG,
-#ifdef SADB_X_AALG_SHA2_256HMAC_TRUNCBUG
-	.integ_sadb_aalg_id = SADB_X_AALG_SHA2_256HMAC_TRUNCBUG,
-#endif
 	.integ_netlink_xfrm_name = "hmac(sha256)",
 	.integ_tcpdump_name = "hmac_sha2_256_truncbug",
 	.integ_ike_audit_name = "hmac_sha2_256_truncbug",
@@ -194,7 +146,7 @@ const struct hash_desc ike_alg_hash_sha2_384 = {
 			[IKEv1_ESP_ID] = -1,
 			[IKEv2_ALG_ID] =  IKEv2_HASH_ALGORITHM_SHA2_384,
 		},
-		.fips = true,
+		.fips.approved = true,
 	},
 	.nss = {
 		.oid_tag = SEC_OID_SHA384,
@@ -223,7 +175,7 @@ const struct prf_desc ike_alg_prf_sha2_384 = {
 			[IKEv1_ESP_ID] = -1,
 			[IKEv2_ALG_ID] = IKEv2_PRF_HMAC_SHA2_384,
 		},
-		.fips = true,
+		.fips.approved = true,
 	},
 	.nss = {
 		.mechanism = CKM_SHA384_HMAC,
@@ -251,19 +203,19 @@ const struct integ_desc ike_alg_integ_sha2_384 = {
 			[IKEv1_OAKLEY_ID] = OAKLEY_SHA2_384,
 			[IKEv1_ESP_ID] = AUTH_ALGORITHM_HMAC_SHA2_384,
 			[IKEv2_ALG_ID] = IKEv2_INTEG_HMAC_SHA2_384_192,
+#ifdef SADB_X_AALG_SHA2_384HMAC
+			[SADB_ALG_ID] = SADB_X_AALG_SHA2_384HMAC,
+#endif
+#ifdef SADB_X_AALG_SHA2_384
+			[SADB_ALG_ID] = SADB_X_AALG_SHA2_384,
+#endif
 		},
-		.fips = true,
+		.fips.approved = true,
 	},
 	.integ_keymat_size = SHA2_384_DIGEST_SIZE,
 	.integ_output_size = SHA2_384_DIGEST_SIZE / 2,
 	.integ_ikev1_ah_transform = AH_SHA2_384,
 	.prf = &ike_alg_prf_sha2_384,
-#ifdef SADB_X_AALG_SHA2_384HMAC
-	.integ_sadb_aalg_id = SADB_X_AALG_SHA2_384HMAC,
-#endif
-#ifdef SADB_X_AALG_SHA2_384
-	.integ_sadb_aalg_id = SADB_X_AALG_SHA2_384,
-#endif
 	.integ_netlink_xfrm_name = "hmac(sha384)",
 	.integ_tcpdump_name = "sha384",
 	.integ_ike_audit_name = "sha384",
@@ -301,7 +253,7 @@ const struct hash_desc ike_alg_hash_sha2_512 = {
 			[IKEv1_ESP_ID] = -1,
 			[IKEv2_ALG_ID] = IKEv2_HASH_ALGORITHM_SHA2_512,
 		},
-		.fips = true,
+		.fips.approved = true,
 	},
 	.nss = {
 		.oid_tag = SEC_OID_SHA512,
@@ -330,7 +282,7 @@ const struct prf_desc ike_alg_prf_sha2_512 = {
 			[IKEv1_ESP_ID] = -1,
 			[IKEv2_ALG_ID] = IKEv2_PRF_HMAC_SHA2_512,
 		},
-		.fips = true,
+		.fips.approved = true,
 	},
 	.nss = {
 		.mechanism = CKM_SHA512_HMAC,
@@ -358,19 +310,19 @@ const struct integ_desc ike_alg_integ_sha2_512 = {
 			[IKEv1_OAKLEY_ID] = OAKLEY_SHA2_512,
 			[IKEv1_ESP_ID] = AUTH_ALGORITHM_HMAC_SHA2_512,
 			[IKEv2_ALG_ID] = IKEv2_INTEG_HMAC_SHA2_512_256,
+#ifdef SADB_X_AALG_SHA2_512HMAC
+			[SADB_ALG_ID] = SADB_X_AALG_SHA2_512HMAC,
+#endif
+#ifdef SADB_X_AALG_SHA2_512
+			[SADB_ALG_ID] = SADB_X_AALG_SHA2_512,
+#endif
 		},
-		.fips = true,
+		.fips.approved = true,
 	},
 	.integ_keymat_size = SHA2_512_DIGEST_SIZE,
 	.integ_output_size = SHA2_512_DIGEST_SIZE / 2,
 	.integ_ikev1_ah_transform = AH_SHA2_512,
 	.prf = &ike_alg_prf_sha2_512,
-#ifdef SADB_X_AALG_SHA2_512HMAC
-	.integ_sadb_aalg_id = SADB_X_AALG_SHA2_512HMAC,
-#endif
-#ifdef SADB_X_AALG_SHA2_512
-	.integ_sadb_aalg_id = SADB_X_AALG_SHA2_512,
-#endif
 	.integ_netlink_xfrm_name = "hmac(sha512)",
 	.integ_tcpdump_name = "sha512",
 	.integ_ike_audit_name = "sha512",

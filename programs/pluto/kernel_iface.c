@@ -26,8 +26,10 @@
 
 #include <sys/ioctl.h>
 #include <net/if.h>
+#include <errno.h>
+#include <unistd.h>
 
-#include "socketwrapper.h"		/* for safe_sock() */
+#include "lsw_socket.h"
 
 #include "ip_info.h"
 
@@ -52,11 +54,11 @@ struct raw_iface *find_raw_ifaces(const struct ip_info *afi, struct logger *logg
 	dbg("finding raw interfaces of type %s", afi->ip_name);
 
 
-	int udp_sock = safe_socket(afi->pf, SOCK_DGRAM, IPPROTO_UDP);
+	int udp_sock = cloexec_socket(afi->socket.domain, SOCK_DGRAM, IPPROTO_UDP);
 	if (udp_sock == -1) {
 		fatal_errno(PLUTO_EXIT_FAIL, logger, errno,
-			    "find %s interfaces failed calling socket(%s, SOCK_DGRAM, IPPROTO_UDP)",
-			    afi->ip_name, afi->pf_name);
+			    "find %s interfaces failed calling cloexec_socket(%s, SOCK_DGRAM, IPPROTO_UDP)",
+			    afi->ip_name, afi->socket.domain_name);
 	}
 
 	/*
@@ -94,13 +96,15 @@ struct raw_iface *find_raw_ifaces(const struct ip_info *afi, struct logger *logg
 	 *
 	 * Tricky: num is a static so that we won't have to start from
 	 * 64 in subsequent calls to find_raw_ifaces4.
+	 *
+	 * See netdevice(7) (linux) or netintro(4) (BSD).
 	 */
 	static volatile int num = 64; /* not very thread safe */
 	struct ifconf ifconf = { .ifc_len = 0, };
 	void *buf = NULL;	/* for list of interfaces -- arbitrary limit */
 	for (; num < (1024 * 1024); num *= 2) {
-		/* Get num local interfaces.  See netdevice(7). */
 		int len = num * sizeof(struct ifreq);
+		dbg("  allocated %d buffer for SIOCGIFCONF", len);
 		realloc_bytes(&buf, ifconf.ifc_len, len, "ifreq");
 
 		ifconf = (struct ifconf) {
@@ -120,16 +124,52 @@ struct raw_iface *find_raw_ifaces(const struct ip_info *afi, struct logger *logg
 		}
 	}
 
+	/*
+	 * Because, on FreeBSD and OpenBSD the <<struct ifreq>> isn't
+	 * big enough to hold an IPv[46] address, the entries can be
+	 * larger than sizeof(struct ifreq).
+	 *
+	 * Code below gets to figure out the true size.
+	 */
 	unsigned nr_req = (ifconf.ifc_len / sizeof(struct ifreq));
-	dbg("ioctl(IOCGIFCONF) returned %u %s interfaces", nr_req, afi->ip_name);
+	dbg("  ioctl(SIOCGIFCONF) returned %u bytes (roughly %u %s interfaces)",
+	    ifconf.ifc_len, nr_req, afi->ip_name);
 
 	/*
-	 * Add an entry to rifaces for each interesting interface.
+	 * For each interesting interface, add an entry to rifaces.
 	 */
 	struct raw_iface *rifaces = NULL;
-	for (const struct ifreq *ifr = ifconf.ifc_req; ifr < ifconf.ifc_req + nr_req; ifr++) {
+	const void *ifrp = buf;
+	while (ifrp < buf + ifconf.ifc_len) {
 
-		/* build a NUL-terminated copy of the rname field */
+		/*
+		 * Current offset into the buffer.
+		 */
+		const struct ifreq *ifr = ifrp;
+
+		/*
+		 * Determine the true size of the structure at IFR and
+		 * use that to advance the buffer pointer.
+		 *
+		 * While NetBSD an Linux can use sizeof(struct ifreq)
+		 * directly, FreeBSD, OpenBSD and Darwin need to look
+		 * at .sa_len (equation, below, also also works on
+		 * NetBSD).
+		 *
+		 * Darwin defines the macro _SIZEOF_ADDR_IFREQ() in
+		 * <net/if.h> with an equivalent equation.
+		 */
+#ifdef USE_SOCKADDR_LEN
+		ifrp += (ifr->ifr_ifru.ifru_addr.sa_len <= sizeof(ifr->ifr_ifru) ? sizeof(struct ifreq) :
+			 (sizeof(struct ifreq) - sizeof(ifr->ifr_ifru) + ifr->ifr_ifru.ifru_addr.sa_len));
+#else
+		ifrp += sizeof(struct ifreq);
+#endif
+
+		/*
+		 * Because .ifr_name may not be NUL terminated, build
+		 * a NUL-terminated copy of its value.
+		 */
 		char ifname[IFNAMSIZ + 1];
 		memcpy(ifname, ifr->ifr_name, IFNAMSIZ);
 		ifname[IFNAMSIZ] = '\0';
@@ -142,7 +182,8 @@ struct raw_iface *find_raw_ifaces(const struct ip_info *afi, struct logger *logg
 		}
 
 		ip_address addr;
-		err_t e = sockaddr_to_address_port(&ifr->ifr_addr, sizeof(ifr->ifr_ifru),
+		err_t e = sockaddr_to_address_port(&ifr->ifr_addr,
+						   ifrp - (const void*)&ifr->ifr_addr,
 						   &addr, NULL/*port*/);
 		if (e != NULL) {
 			dbg("  ignoring %s interface %s: %s",
@@ -182,9 +223,9 @@ struct raw_iface *find_raw_ifaces(const struct ip_info *afi, struct logger *logg
 		passert(sizeof(auxinfo.ifr_name) == sizeof(ifr->ifr_name)); /* duh! */
 		memcpy(auxinfo.ifr_name, ifr->ifr_name, IFNAMSIZ);
 		if (ioctl(udp_sock, SIOCGIFFLAGS, &auxinfo) == -1) {
-			log_errno(logger, errno,
-				  "ignored %s interface %s - ioctl(SIOCGIFFLAGS) failed",
-				  afi->ip_name, ifname);
+			llog_error(logger, errno,
+				   "ignored %s interface %s - ioctl(SIOCGIFFLAGS) failed",
+				   afi->ip_name, ifname);
 			continue; /* happens when using device with label? */
 		}
 
@@ -202,9 +243,8 @@ struct raw_iface *find_raw_ifaces(const struct ip_info *afi, struct logger *logg
 		}
 #endif
 
-		struct raw_iface *ri = overalloc_thing(struct raw_iface,
-						       strlen(ifname) + 1,
-						       "iface");
+		struct raw_iface *ri =
+			over_alloc_thing(struct raw_iface, strlen(ifname) + 1);
 		ri->addr = addr;
 		strcpy(ri->name, ifname);
 		ri->next = rifaces;

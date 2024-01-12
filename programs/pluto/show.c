@@ -43,7 +43,7 @@
 #include "kernel_xfrm_interface.h"
 #include "iface.h"
 #include "show.h"
-#ifdef HAVE_SECCOMP
+#ifdef USE_SECCOMP
 #include "pluto_seccomp.h"
 #endif
 
@@ -180,7 +180,7 @@ static void show_system_security(struct show *s)
 	show_comment(s, "fips mode=%s;", fips ? "enabled" : "disabled");
 	show_comment(s, "SElinux=%s",
 		selinux == 0 ? "disabled" : selinux == 1 ? "enabled" : "indeterminate");
-#ifdef HAVE_SECCOMP
+#ifdef USE_SECCOMP
 	show_comment(s, "seccomp=%s",
 		     pluto_seccomp_mode == SECCOMP_ENABLED ? "enabled" :
 		     pluto_seccomp_mode == SECCOMP_TOLERANT ? "tolerant" : "disabled");
@@ -195,7 +195,7 @@ void show_global_status(struct show *s)
 	show_pluto_stats(s);
 }
 
-void show_status(struct show *s)
+void show_status(struct show *s, const monotime_t now)
 {
 	show_kernel_interface(s);
 	show_ifaces_status(s);
@@ -209,7 +209,7 @@ void show_status(struct show *s)
 	show_db_ops_status(s);
 	show_connections_status(s);
 	show_brief_status(s);
-	show_states(s);
+	show_states(s, now);
 #if defined(KERNEL_XFRM)
 	show_shunt_status(s);
 #endif

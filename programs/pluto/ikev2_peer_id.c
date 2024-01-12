@@ -38,6 +38,7 @@
 #include "unpack.h"
 #include "pluto_x509.h"
 #include "peer_id.h"
+#include "ikev2_certreq.h"
 
 static diag_t decode_v2_peer_id(const char *peer, struct payload_digest *const id_peer, struct id *peer_id)
 {
@@ -88,14 +89,6 @@ diag_t ikev2_responder_decode_initiator_id(struct ike_sa *ike, struct msg_digest
 			dbg("received IDr - our alleged ID '%s'", str_id(tarzan_id, &idb));
 		}
 	}
-
-	/*
-	 * Process any CERTREQ payloads.
-	 *
-	 * These are used as hints when selecting a better connection
-	 * based on ID.
-	 */
-	decode_v2_certificate_requests(&ike->sa, md);
 
 	/*
 	 * Convert the proposed connections into something this
@@ -176,9 +169,6 @@ diag_t ikev2_initiator_decode_responder_id(struct ike_sa *ike, struct msg_digest
 	if (d != NULL) {
 		return d;
 	}
-
-	/* process any CERTREQ payloads */
-	decode_v2_certificate_requests(&ike->sa, md);
 
 	/* start considering connection */
 	return update_peer_id(ike, &responder_id, NULL/*tarzan isn't interesting*/);

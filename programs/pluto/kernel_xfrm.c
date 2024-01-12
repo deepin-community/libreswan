@@ -35,41 +35,50 @@
  * for more details.
  */
 
+/* system headers */
+
 #include <errno.h>
 #include <fcntl.h>
 #include <string.h>
-
-#include <sys/socket.h>
-
+#include <unistd.h>		/* for write() */
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/ioctl.h>
 #include <stdint.h>
+
+/*
+ * GRRR:
+ *
+ * GLIBC/Linux and MUSL/Linux define sockaddr_in et.al. in
+ * <netinet/in.h>, and the generic network code uses this.
+ * Unfortunately (cough) the Linux kernel headers also provide
+ * definitions of those structures in <linux/in.h> et.al. which,
+ * depending on header include order can result in conflicting
+ * definitions.  For instance, if sockaddr_in is not defined,
+ * <linux/xfrm.h> will include the definition in <linux/in.h> but that
+ * will then clash with a later include of <netinet/in.h>.
+ *
+ * GLIBC/Linux has hacks on hacks to work-around this, not MUSL.
+ * Fortunately, including <netinet/in.h> first will force the Linux
+ * kernel headers to use that definition.
+ *
+ * XXX: include this before any other Linux kernel headers try to
+ * include the conflicting definition.
+ */
+#include <netinet/in.h>
+
+#include "linux/xfrm.h"		/* local (if configured) or system copy */
+
 #include <linux/ethtool.h>
 #include <linux/sockios.h>
-
-#include <linux/udp.h>			/* for TCP_ENCAP_ESPINTCP and UDP_ENCAP_ESPINUDP */
-#ifndef TCP_ENCAP_ESPINTCP
-#define TCP_ENCAP_ESPINTCP 7
-#endif
-
-#include <unistd.h>
-#include <sys/stat.h>
 
 #include <linux/rtnetlink.h>
 #include <linux/if_addr.h>
 #include <linux/if_link.h>
 
-/* work around weird combo's of glibc and kernel header conflicts */
-#ifndef GLIBC_KERN_FLIP_HEADERS
-# include "linux/xfrm.h" /* local (if configured) or system copy */
-# include "libreswan.h"
-#else
-# include "libreswan.h"
-# include "linux/xfrm.h" /* local (if configured) or system copy */
-#endif
+/* libreswan headers */
 
-#include "sysdep.h"
-#include "socketwrapper.h"
+#include "lsw_socket.h"
 #include "constants.h"
 #include "defs.h"
 #include "id.h"
@@ -197,7 +206,7 @@ static xfrm_address_t xfrm_from_address(const ip_address *addr)
 
 #define SELECTOR_TO_XFRM(CLIENT, REQ, L)				\
 	{								\
-		ip_selector client_ = *(CLIENT);			\
+		ip_selector client_ = (CLIENT);				\
 		ip_address address = selector_prefix(client_);		\
 		(REQ).L##addr = xfrm_from_address(&address);		\
 		(REQ).prefixlen_##L = selector_prefix_bits(client_);	\
@@ -206,19 +215,9 @@ static xfrm_address_t xfrm_from_address(const ip_address *addr)
 
 static void init_netlink_route_fd(struct logger *logger)
 {
-	nl_route_fd = safe_socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
+	nl_route_fd = cloexec_socket(AF_NETLINK, SOCK_RAW|SOCK_NONBLOCK, NETLINK_ROUTE);
 	if (nl_route_fd < 0) {
 		fatal_errno(PLUTO_EXIT_FAIL, logger, errno, "socket()");
-	}
-
-	if (fcntl(nl_route_fd, F_SETFD, FD_CLOEXEC) != 0) {
-		fatal_errno(PLUTO_EXIT_FAIL, logger, errno,
-			    "fcntl(FD_CLOEXEC) for bcast NETLINK_ROUTE ");
-	}
-
-	if (fcntl(nl_route_fd, F_SETFL, O_NONBLOCK) != 0) {
-		fatal_errno(PLUTO_EXIT_FAIL, logger, errno,
-			    "fcntl(O_NONBLOCK) for bcast NETLINK_ROUTE");
 	}
 
 	struct sockaddr_nl addr = {
@@ -230,7 +229,7 @@ static void init_netlink_route_fd(struct logger *logger)
 
 	if (bind(nl_route_fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
 		fatal_errno(PLUTO_EXIT_FAIL, logger, errno,
-			    "failed to bind NETLINK_ROUTE bcast socket - Perhaps kernel was not compiled with CONFIG_XFRM");
+			    "failed to bind NETLINK_ROUTE bcast socket - perhaps kernel was not compiled with CONFIG_XFRM");
 	}
 }
 
@@ -254,32 +253,17 @@ static void init_netlink(struct logger *logger)
 
 	struct sockaddr_nl addr;
 
-	nl_send_fd = safe_socket(AF_NETLINK, SOCK_DGRAM, NETLINK_XFRM);
+	nl_send_fd = cloexec_socket(AF_NETLINK, SOCK_DGRAM, NETLINK_XFRM);
 
 	if (nl_send_fd < 0) {
 		fatal_errno(PLUTO_EXIT_FAIL, logger, errno,
 			    "socket() in init_netlink()");
 	}
 
-	if (fcntl(nl_send_fd, F_SETFD, FD_CLOEXEC) != 0) {
-		fatal_errno(PLUTO_EXIT_FAIL, logger, errno,
-			    "fcntl(FD_CLOEXEC) in init_netlink()");
-	}
-
-	nl_xfrm_fd = safe_socket(AF_NETLINK, SOCK_DGRAM, NETLINK_XFRM);
+	nl_xfrm_fd = cloexec_socket(AF_NETLINK, SOCK_DGRAM|SOCK_NONBLOCK, NETLINK_XFRM);
 	if (nl_xfrm_fd < 0) {
 		fatal_errno(PLUTO_EXIT_FAIL, logger, errno,
 			    "socket() for bcast in init_netlink()");
-	}
-
-	if (fcntl(nl_xfrm_fd, F_SETFD, FD_CLOEXEC) != 0) {
-		fatal_errno(PLUTO_EXIT_FAIL, logger, errno,
-			    "fcntl(FD_CLOEXEC) for bcast in init_netlink()");
-	}
-
-	if (fcntl(nl_xfrm_fd, F_SETFL, O_NONBLOCK) != 0) {
-		fatal_errno(PLUTO_EXIT_FAIL, logger, errno,
-			    "fcntl(O_NONBLOCK) for bcast in init_netlink()");
 	}
 
 	addr.nl_family = AF_NETLINK;
@@ -288,7 +272,7 @@ static void init_netlink(struct logger *logger)
 	addr.nl_groups = XFRMGRP_ACQUIRE | XFRMGRP_EXPIRE;
 	if (bind(nl_xfrm_fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
 		fatal_errno(PLUTO_EXIT_FAIL, logger, errno,
-			    "Failed to bind bcast socket in init_netlink() - Perhaps kernel was not compiled with CONFIG_XFRM");
+			    "Failed to bind bcast socket in init_netlink() - perhaps kernel was not compiled with CONFIG_XFRM");
 	}
 
 	init_netlink_route_fd(logger);
@@ -353,19 +337,19 @@ static bool sendrecv_xfrm_msg(struct nlmsghdr *hdr,
 
 	if (r < 0) {
 		sparse_buf sb;
-		log_errno(logger, errno,
-			  "netlink write() of %s message for %s %s failed",
-			  str_sparse(xfrm_type_names, hdr->nlmsg_type, &sb),
-			  description, story);
+		llog_error(logger, errno,
+			   "netlink write() of %s message for %s %s failed",
+			   str_sparse(xfrm_type_names, hdr->nlmsg_type, &sb),
+			   description, story);
 		return false;
 	}
 
 	if ((size_t)r != len) {
 		sparse_buf sb;
-		llog(RC_LOG_SERIOUS, logger,
-		     "ERROR: netlink write() of %s message for %s %s truncated: %zd instead of %zu",
-		     str_sparse(xfrm_type_names, hdr->nlmsg_type, &sb),
-		     description, story, r, len);
+		llog_error(logger, 0/*no-errno*/,
+			   "netlink write() of %s message for %s %s truncated: %zd instead of %zu",
+			   str_sparse(xfrm_type_names, hdr->nlmsg_type, &sb),
+			   description, story, r, len);
 		return false;
 	}
 
@@ -379,10 +363,10 @@ static bool sendrecv_xfrm_msg(struct nlmsghdr *hdr,
 				continue;
 			*recv_errno = errno;
 			sparse_buf sb;
-			log_errno(logger, errno,
-				  "netlink recvfrom() of response to our %s message for %s %s failed",
-				  str_sparse(xfrm_type_names, hdr->nlmsg_type, &sb),
-				  description, story);
+			llog_error(logger, errno,
+				   "netlink recvfrom() of response to our %s message for %s %s failed",
+				   str_sparse(xfrm_type_names, hdr->nlmsg_type, &sb),
+				   description, story);
 			return false;
 		} else if ((size_t) r < sizeof(rsp.n)) {
 			llog(RC_LOG, logger,
@@ -417,10 +401,8 @@ static bool sendrecv_xfrm_msg(struct nlmsghdr *hdr,
 
 	if (rsp.n.nlmsg_type != expected_resp_type && rsp.n.nlmsg_type == NLMSG_ERROR) {
 		if (rsp.u.e.error != 0) {
-			llog(RC_LOG_SERIOUS, logger,
-				    "ERROR: netlink response for %s %s included errno %d: %s",
-				    description, story, -rsp.u.e.error,
-				    strerror(-rsp.u.e.error));
+			llog_error(logger, -rsp.u.e.error,
+				   "netlink response for %s %s", description, story);
 			return false;
 		}
 		/*
@@ -506,10 +488,10 @@ static bool sendrecv_xfrm_policy(struct nlmsghdr *hdr,
 	}
 
 	sparse_buf sb;
-	log_errno(logger, error,
-		  "kernel: xfrm %s %s response for flow %s",
-		  str_sparse(xfrm_type_names, hdr->nlmsg_type, &sb),
-		  story, adstory);
+	llog_error(logger, error,
+		   "kernel: xfrm %s %s response for flow %s",
+		   str_sparse(xfrm_type_names, hdr->nlmsg_type, &sb),
+		   story, adstory);
 	return false;
 }
 
@@ -534,6 +516,7 @@ static bool sendrecv_xfrm_policy(struct nlmsghdr *hdr,
  * @return boolean True if successful
  */
 static bool xfrm_raw_policy(enum kernel_policy_op op,
+			    enum kernel_policy_dir dir,
 			    enum expect_kernel_policy what_about_inbound,
 			    const ip_selector *src_client,
 			    const ip_selector *dst_client,
@@ -546,7 +529,9 @@ static bool xfrm_raw_policy(enum kernel_policy_op op,
 			    const shunk_t sec_label,
 			    struct logger *logger)
 {
-	const char *op_str = enum_name(&kernel_policy_op_names, op);
+	const char *op_str = enum_name_short(&kernel_policy_op_names, op);
+	const char *dir_str = enum_name_short(&kernel_policy_dir_names, dir);
+
 	const struct ip_protocol *client_proto = selector_protocol(*src_client);
 	pexpect(selector_protocol(*dst_client) == client_proto);
 
@@ -607,7 +592,8 @@ static bool xfrm_raw_policy(enum kernel_policy_op op,
 		policy_name = "%discard(discard)";
 		break;
 	case SHUNT_TRAP:
-		if (op == KP_ADD_INBOUND || op == KP_DELETE_INBOUND) {
+		if ((op == KERNEL_POLICY_OP_ADD && dir == KERNEL_POLICY_DIR_INBOUND) ||
+		    (op == KERNEL_POLICY_OP_DELETE && dir == KERNEL_POLICY_DIR_INBOUND)) {
 			dbg("%s() inbound SHUNT_TRAP implemented as no-op", __func__);
 			return true;
 		}
@@ -618,9 +604,14 @@ static bool xfrm_raw_policy(enum kernel_policy_op op,
 		bad_case(shunt_policy);
 	}
 
-	const unsigned xfrm_dir = (op == KP_ADD_INBOUND || op == KP_DELETE_INBOUND) ? XFRM_POLICY_IN : XFRM_POLICY_OUT;
-	dbg("%s() policy=%s action=%d dir=%d op=%s",
-	    __func__, policy_name, xfrm_action, xfrm_dir, op_str);
+	/* XXX: notice how this ignores KERNEL_OP_REPLACE!?! */
+	const unsigned xfrm_dir =
+		(((op == KERNEL_POLICY_OP_ADD && dir == KERNEL_POLICY_DIR_INBOUND) ||
+		  (op == KERNEL_POLICY_OP_DELETE && dir == KERNEL_POLICY_DIR_INBOUND))
+		 ? XFRM_POLICY_IN
+		 : XFRM_POLICY_OUT);
+	dbg("%s() policy=%s action=%d xfrm_dir=%d op=%s dir=%s",
+	    __func__, policy_name, xfrm_action, xfrm_dir, op_str, dir_str);
 
 	zero(&req);
 	req.n.nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
@@ -630,8 +621,8 @@ static bool xfrm_raw_policy(enum kernel_policy_op op,
 	dbg("%s() using family %s (%d)", __func__, dst_client_afi->ip_name, family);
 
 	/* .[sd]addr, .prefixlen_[sd], .[sd]port */
-	SELECTOR_TO_XFRM(src_client, req.u.p.sel, s);
-	SELECTOR_TO_XFRM(dst_client, req.u.p.sel, d);
+	SELECTOR_TO_XFRM(*src_client, req.u.p.sel, s);
+	SELECTOR_TO_XFRM(*dst_client, req.u.p.sel, d);
 
 	/*
 	 * Munge .[sd]port?
@@ -665,8 +656,8 @@ static bool xfrm_raw_policy(enum kernel_policy_op op,
 	req.u.p.sel.proto = client_proto->ipproto;
 	req.u.p.sel.family = family;
 
-	if (op == KP_DELETE_OUTBOUND ||
-	    op == KP_DELETE_INBOUND) {
+	if ((op == KERNEL_POLICY_OP_DELETE && dir == KERNEL_POLICY_DIR_OUTBOUND) ||
+	    (op == KERNEL_POLICY_OP_DELETE && dir == KERNEL_POLICY_DIR_INBOUND)) {
 		req.u.id.dir = xfrm_dir;
 		req.n.nlmsg_type = XFRM_MSG_DELPOLICY;
 		req.n.nlmsg_len = NLMSG_ALIGN(NLMSG_LENGTH(sizeof(req.u.id)));
@@ -710,8 +701,8 @@ static bool xfrm_raw_policy(enum kernel_policy_op op,
 	 * is needed.  Lets find out.
 	 */
 	if (kernel_policy != NULL &&
-	    op != KP_DELETE_OUTBOUND &&
-	    op != KP_DELETE_INBOUND) {
+	    !(op == KERNEL_POLICY_OP_DELETE && dir == KERNEL_POLICY_DIR_OUTBOUND) &&
+	    !(op == KERNEL_POLICY_OP_DELETE && dir == KERNEL_POLICY_DIR_INBOUND)) {
 		struct xfrm_user_tmpl tmpls[4] = {0};
 
 		/* remember; kernel_policy.rule[] is 1 based */
@@ -757,19 +748,19 @@ static bool xfrm_raw_policy(enum kernel_policy_op op,
 
 	} else if (DBGP(DBG_BASE)) {
 		if (kernel_policy == NULL) {
-			DBG_log("%s() ignoring xfrm_user_tmpl because NULL, op=%s",
-				__func__, op_str);
+			DBG_log("%s() ignoring xfrm_user_tmpl because NULL, op=%s dir=%s",
+				__func__, op_str, dir_str);
 		} else {
 			/*
 			 * Dump ignored proto_info[].
 			 */
 			for (unsigned i = 1; i <= kernel_policy->nr_rules; i++) {
 				const struct kernel_policy_rule *rule = &kernel_policy->rule[i];
-				DBG_log("%s() ignoring xfrm_user_tmpl reqid=%d proto=%s %s because op=%s",
+				DBG_log("%s() ignoring xfrm_user_tmpl reqid=%d proto=%s %s because op=%s dir=%s",
 					__func__, rule->reqid,
 					protocol_by_ipproto(rule->proto)->name,
 					encap_mode_name(kernel_policy->mode),
-					op_str);
+					op_str, dir_str);
 			}
 		}
 	}
@@ -838,7 +829,7 @@ static bool xfrm_raw_policy(enum kernel_policy_op op,
 	}
 
 	bool ok = sendrecv_xfrm_policy(&req.n, what_about_inbound, policy_name,
-				       ((op & KERNEL_POLICY_OUTBOUND) ? "(out)" : "(in)"),
+				       (dir == KERNEL_POLICY_DIR_OUTBOUND ? "(out)" : "(in)"),
 				       logger);
 
 	/*
@@ -849,37 +840,40 @@ static bool xfrm_raw_policy(enum kernel_policy_op op,
 	 *
 	 * XXX: and yes, the code below doesn't exactly do just that.
 	 */
-	switch (op) {
-	case KP_DELETE_INBOUND:
-		/*
-		 * ??? we will call netlink_policy even if !ok.
-		 *
-		 * XXX: It's also called when transport mode!
-		 *
-		 * Presumably this is trying to also delete earlier
-		 * SNAFUs.
-		 */
-		dbg("xfrm: %s() deleting policy forward (even when there may not be one)",
-		    __func__);
-		req.u.id.dir = XFRM_POLICY_FWD;
-		ok &= sendrecv_xfrm_policy(&req.n, IGNORE_KERNEL_POLICY_MISSING,
-					   policy_name, "(fwd)", logger);
-		break;
-	case KP_ADD_INBOUND:
-		if (!ok) {
+	if (dir == KERNEL_POLICY_DIR_INBOUND) {
+		switch (op) {
+		case KERNEL_POLICY_OP_DELETE:
+			/*
+			 * ??? we will call netlink_policy even if
+			 * !ok.
+			 *
+			 * XXX: It's also called when transport mode!
+			 *
+			 * Presumably this is trying to also delete
+			 * earlier SNAFUs.
+			 */
+			dbg("xfrm: %s() deleting policy forward (even when there may not be one)",
+			    __func__);
+			req.u.id.dir = XFRM_POLICY_FWD;
+			ok &= sendrecv_xfrm_policy(&req.n, IGNORE_KERNEL_POLICY_MISSING,
+						   policy_name, "(fwd)", logger);
 			break;
-		}
-		if (shunt_policy == SHUNT_UNSET &&
-		    kernel_policy != NULL && kernel_policy->mode == ENCAP_MODE_TRANSPORT) {
+		case KERNEL_POLICY_OP_ADD:
+			if (!ok) {
+				break;
+			}
+			if (shunt_policy == SHUNT_UNSET &&
+			    kernel_policy != NULL && kernel_policy->mode == ENCAP_MODE_TRANSPORT) {
+				break;
+			}
+			dbg("xfrm: %s() adding policy forward (suspect a tunnel)", __func__);
+			req.u.p.dir = XFRM_POLICY_FWD;
+			ok &= sendrecv_xfrm_policy(&req.n, what_about_inbound,
+						   policy_name, "(fwd)", logger);
 			break;
+		default:
+			break; /*no-op*/
 		}
-		dbg("xfrm: %s() adding policy forward (suspect a tunnel)", __func__);
-		req.u.p.dir = XFRM_POLICY_FWD;
-		ok &= sendrecv_xfrm_policy(&req.n, what_about_inbound,
-					   policy_name, "(fwd)", logger);
-		break;
-	default:
-		break; /*no-op*/
 	}
 	return ok;
 }
@@ -887,14 +881,14 @@ static bool xfrm_raw_policy(enum kernel_policy_op op,
 static void set_migration_attr(const struct kernel_sa *sa,
 			       struct xfrm_user_migrate *m)
 {
-	m->old_saddr = xfrm_from_address(sa->src.address);
-	m->old_daddr = xfrm_from_address(sa->dst.address);
+	m->old_saddr = xfrm_from_address(&sa->src.address);
+	m->old_daddr = xfrm_from_address(&sa->dst.address);
 	m->new_saddr = xfrm_from_address(&sa->src.new_address);
 	m->new_daddr = xfrm_from_address(&sa->dst.new_address);
-	m->mode = (sa->level == 0 && sa->tunnel ? ENCAPSULATION_MODE_TUNNEL : XFRM_MODE_TRANSPORT);
+	m->mode = (sa->level == 0 && sa->tunnel ? XFRM_MODE_TUNNEL : XFRM_MODE_TRANSPORT);
 	m->proto = sa->proto->ipproto;
 	m->reqid = sa->reqid;
-	m->old_family = m->new_family = address_type(sa->src.address)->af;
+	m->old_family = m->new_family = address_info(sa->src.address)->af;
 }
 
 /*
@@ -943,13 +937,13 @@ static bool create_xfrm_migrate_sa(struct state *st,
 	const struct end_info local = {
 		.end = &c->spd.this,
 		.endpoint = st->st_interface->local_endpoint,
-		.spi = proto_info->our_spi,
+		.spi = proto_info->inbound.spi,
 	};
 
 	const struct end_info remote = {
 		.end = &c->spd.that,
 		.endpoint = st->st_remote_endpoint,
-		.spi = proto_info->attrs.spi,
+		.spi = proto_info->outbound.spi,
 	};
 
 	const struct end_info *src, *dst;
@@ -973,22 +967,22 @@ static bool create_xfrm_migrate_sa(struct state *st,
 	struct kernel_sa sa = {
 		.xfrm_dir = dir,
 		.proto = proto,
-		.reqid = reqid_esp(c->spd.reqid),
 		.encap_type = encap_type,
+		.reqid = reqid_esp(c->spd.reqid),
 		.tunnel = (st->st_ah.attrs.mode == ENCAPSULATION_MODE_TUNNEL ||
 			   st->st_esp.attrs.mode == ENCAPSULATION_MODE_TUNNEL),
 		.story = story->buf,	/* content will evolve */
 		.spi = dst->spi,
 		.src = {
-			.address = &src->end->host->addr,
+			.address = src->end->host->addr,
 			.new_address = src->end->host->addr,	/* may change */
-			.client = &src->end->client,
+			.client = src->end->client,
 			.encap_port = endpoint_hport(src->endpoint),	/* may change */
 		},
 		.dst = {
-			.address = &dst->end->host->addr,
+			.address = dst->end->host->addr,
 			.new_address = dst->end->host->addr,	/* may change */
-			.client = &dst->end->client,
+			.client = dst->end->client,
 			.encap_port = endpoint_hport(dst->endpoint),	/* may change */
 		},
 		/* WWW what about sec_label? */
@@ -1010,7 +1004,7 @@ static bool create_xfrm_migrate_sa(struct state *st,
 		new_ep = st->st_mobike_remote_endpoint;
 	}
 
-	struct kernel_end *changing_ke = (old_ei == src) ? &sa.src : &sa.dst;
+	struct kernel_state_end *changing_ke = (old_ei == src) ? &sa.src : &sa.dst;
 
 	changing_ke->new_address = endpoint_address(new_ep);
 	changing_ke->encap_port = endpoint_hport(new_ep);
@@ -1023,10 +1017,10 @@ static bool create_xfrm_migrate_sa(struct state *st,
 
 	endpoint_buf ra_old, ra_new;
 	jam(&story_jb, ":%s to %s reqid=%u %s",
-		 str_endpoint(&old_ei->endpoint, &ra_old),
-		 str_endpoint(&new_ep, &ra_new),
-		 sa.reqid,
-		 enum_name(&netkey_sa_dir_names, dir));
+	    str_endpoint(&old_ei->endpoint, &ra_old),
+	    str_endpoint(&new_ep, &ra_new),
+	    sa.reqid,
+	    enum_name(&xfrm_policy_names, dir));
 
 	dbg("%s", story->buf);
 
@@ -1048,7 +1042,7 @@ static bool migrate_xfrm_sa(const struct kernel_sa *sa,
 	zero(&req);
 
 	req.id.dir = sa->xfrm_dir;
-	req.id.sel.family = address_type(sa->src.address)->af;
+	req.id.sel.family = address_info(sa->src.address)->af;
 	/* .[sd]addr, .prefixlen_[sd], .[sd]port */
 	SELECTOR_TO_XFRM(sa->src.client, req.id.sel, s);
 	SELECTOR_TO_XFRM(sa->dst.client, req.id.sel, d);
@@ -1153,8 +1147,8 @@ static bool siocethtool(const char *ifname, void *data, const char *action, stru
 			dbg("cannot offload to %s because SIOCETHTOOL %s failed: %s",
 				ifname, action, strerror(errno));
 		} else {
-			log_errno(logger, errno, "can't offload to %s because SIOCETHTOOL %s failed",
-				  ifname, action);
+			llog_error(logger, errno, "can't offload to %s because SIOCETHTOOL %s failed",
+				   ifname, action);
 		}
 		return false;
 	} else {
@@ -1272,12 +1266,12 @@ static bool netlink_add_sa(const struct kernel_sa *sa, bool replace,
 	req.n.nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
 	req.n.nlmsg_type = replace ? XFRM_MSG_UPDSA : XFRM_MSG_NEWSA;
 
-	req.p.saddr = xfrm_from_address(sa->src.address);
-	req.p.id.daddr = xfrm_from_address(sa->dst.address);
+	req.p.saddr = xfrm_from_address(&sa->src.address);
+	req.p.id.daddr = xfrm_from_address(&sa->dst.address);
 
 	req.p.id.spi = sa->spi;
-	req.p.id.proto = esatype2proto(sa->esatype);
-	req.p.family = address_type(sa->src.address)->af;
+	req.p.id.proto = sa->proto->ipproto;
+	req.p.family = address_info(sa->src.address)->af;
 	/*
 	 * This requires ipv6 modules. It is required to support 6in4
 	 * and 4in6 tunnels in linux 2.6.25+
@@ -1306,6 +1300,7 @@ static bool netlink_add_sa(const struct kernel_sa *sa, bool replace,
 		/* .[sd]addr, .prefixlen_[sd], .[sd]port */
 		SELECTOR_TO_XFRM(sa->src.client, req.p.sel, s);
 		SELECTOR_TO_XFRM(sa->dst.client, req.p.sel, d);
+		const struct ip_protocol *client_protocol = selector_protocol(sa->src.client);
 
 		/*
 		 * Munge .[sd]port?
@@ -1324,32 +1319,28 @@ static bool netlink_add_sa(const struct kernel_sa *sa, bool replace,
 		 * extracts upper 8 bits and lower 8 bits and puts
 		 * into source and destination ports before passing to XFRM.
 		 */
-		if (IPPROTO_ICMP == sa->transport_proto ||
-			IPPROTO_ICMPV6 == sa->transport_proto) {
-			uint16_t icmp_type;
-			uint16_t icmp_code;
-
-			icmp_type = ntohs(req.p.sel.sport) >> 8;
-			icmp_code = ntohs(req.p.sel.sport) & 0xFF;
-
+		if (client_protocol == &ip_protocol_icmp ||
+		    client_protocol == &ip_protocol_icmpv6) {
+			uint16_t sport = hport(selector_port(sa->src.client));
+			uint16_t icmp_type = sport >> 8;
+			uint16_t icmp_code = sport & 0xFF;
 			req.p.sel.sport = htons(icmp_type);
 			req.p.sel.dport = htons(icmp_code);
 		}
 
 		req.p.sel.sport_mask = req.p.sel.sport == 0 ? 0 : ~0;
 		req.p.sel.dport_mask = req.p.sel.dport == 0 ? 0 : ~0;
-		req.p.sel.proto = sa->transport_proto;
-		req.p.sel.family = selector_type(sa->src.client)->af;
+		req.p.sel.proto = client_protocol->ipproto;
+		req.p.sel.family = selector_info(sa->src.client)->af;
 	}
 
 	req.p.reqid = sa->reqid;
 	dbg("%s() adding IPsec SA with reqid %d", __func__, sa->reqid);
 
-	/* TODO expose limits to kernel_sa via config */
-	req.p.lft.soft_byte_limit = XFRM_INF;
-	req.p.lft.soft_packet_limit = XFRM_INF;
-	req.p.lft.hard_byte_limit = XFRM_INF;
-	req.p.lft.hard_packet_limit = XFRM_INF;
+	req.p.lft.soft_byte_limit = sa->sa_max_soft_bytes;
+	req.p.lft.hard_byte_limit = sa->sa_ipsec_max_bytes;
+	req.p.lft.hard_packet_limit = sa->sa_ipsec_max_packets;
+	req.p.lft.soft_packet_limit = sa->sa_max_soft_packets;
 
 	req.n.nlmsg_len = NLMSG_ALIGN(NLMSG_LENGTH(sizeof(req.p)));
 
@@ -1369,13 +1360,13 @@ static bool netlink_add_sa(const struct kernel_sa *sa, bool replace,
 	 * To avoid breaking backward compatibility, we use a new flag
 	 * (XFRM_STATE_ALIGN4) do change original behavior.
 	*/
-	if (sa->esatype == ET_AH &&
-	    address_type(sa->src.address) == &ipv4_info) {
+	if (sa->proto == &ip_protocol_ah &&
+	    address_info(sa->src.address) == &ipv4_info) {
 		dbg("xfrm: aligning IPv4 AH to 32bits as per RFC-4302, Section 3.3.3.2.1");
 		req.p.flags |= XFRM_STATE_ALIGN4;
 	}
 
-	if (sa->esatype != ET_IPCOMP) {
+	if (sa->proto != &ip_protocol_ipcomp) {
 		if (sa->esn) {
 			dbg("xfrm: enabling ESN");
 			req.p.flags |= XFRM_STATE_ESN;
@@ -1425,25 +1416,36 @@ static bool netlink_add_sa(const struct kernel_sa *sa, bool replace,
 
 		/*
 		 * According to RFC-4868 the hash should be nnn/2, so
-		 * 128 bits for SHA256 and 256 for SHA512. The XFRM
+		 * 128 bits for SHA256 and 256 for SHA512.  The XFRM
 		 * kernel uses a default of 96, which was the value in
-		 * an earlier draft. The kernel then introduced a new struct
-		 * xfrm_algo_auth to replace struct xfrm_algo to deal with
-		 * this.
+		 * an earlier draft. The kernel then introduced a new
+		 * struct xfrm_algo_auth to replace struct xfrm_algo
+		 * to deal with this.
+		 *
+		 * Populate XFRM_ALGO_AUTH structure up to, but not
+		 * including, .alg_key[] using the stack.  Can't
+		 * populate RTA_DATA(attr) directly as it may not be
+		 * correctly aligned.
 		 */
-
+		size_t alg_key_offset = offsetof(struct xfrm_algo_auth, alg_key);
 		struct xfrm_algo_auth algo = {
 			.alg_key_len = sa->integ->integ_keymat_size * BITS_PER_BYTE,
 			.alg_trunc_len = sa->integ->integ_output_size * BITS_PER_BYTE,
 		};
+		fill_and_terminate(algo.alg_name, name, sizeof(algo.alg_name));
+
+		/*
+		 * Now copy all of XFRM_ALGO_AEAD structure up to, but
+		 * not including, .alg_key[], to RTA_DATA(attr), and
+		 * then append the encryption key at .alg_key[]'s
+		 * offset.
+		 */
 
 		attr->rta_type = XFRMA_ALG_AUTH_TRUNC;
-		attr->rta_len = RTA_LENGTH(sizeof(algo) + sa->authkeylen);
+		attr->rta_len = RTA_LENGTH(alg_key_offset + sa->authkeylen);
 
-		fill_and_terminate(algo.alg_name, name, sizeof(algo.alg_name));
-		memcpy(RTA_DATA(attr), &algo, sizeof(algo));
-		memcpy((char *)RTA_DATA(attr) + sizeof(algo),
-			sa->authkey, sa->authkeylen);
+		memcpy(RTA_DATA(attr), &algo, alg_key_offset);
+		memcpy((char *)RTA_DATA(attr) + alg_key_offset, sa->authkey, sa->authkeylen);
 
 		req.n.nlmsg_len += attr->rta_len;
 		attr = (struct rtattr *)((char *)attr + attr->rta_len);
@@ -1453,7 +1455,7 @@ static bool netlink_add_sa(const struct kernel_sa *sa, bool replace,
 	 * ??? why does IPCOMP trump aead and ESP?
 	 *  Shouldn't all be bundled?
 	 */
-	if (sa->esatype == ET_IPCOMP) {
+	if (sa->proto == &ip_protocol_ipcomp) {
 
 		if (!pexpect(sa->ipcomp != NULL)) {
 			return false;
@@ -1478,7 +1480,7 @@ static bool netlink_add_sa(const struct kernel_sa *sa, bool replace,
 		req.n.nlmsg_len += attr->rta_len;
 		attr = (struct rtattr *)((char *)attr + attr->rta_len);
 
-	} else if (sa->esatype == ET_ESP) {
+	} else if (sa->proto == &ip_protocol_esp) {
 		const char *name = sa->encrypt->encrypt_netlink_xfrm_name;
 
 		if (name == NULL) {
@@ -1489,37 +1491,58 @@ static bool netlink_add_sa(const struct kernel_sa *sa, bool replace,
 		}
 
 		if (encrypt_desc_is_aead(sa->encrypt)) {
-			struct xfrm_algo_aead algo;
+			/*
+			 * Populate XFRM_ALGO_AEAD structure up to,
+			 * but not including, .alg_key[] using the
+			 * stack.  Can't populate RTA_DATA(attr)
+			 * directly as it may not be correctly
+			 * aligned.
+			 */
+			size_t alg_key_offset = offsetof(struct xfrm_algo_aead, alg_key);
+			struct xfrm_algo_aead algo = {
+				.alg_key_len = sa->enckeylen * BITS_PER_BYTE,
+				.alg_icv_len = sa->encrypt->aead_tag_size * BITS_PER_BYTE,
+			};
+			fill_and_terminate(algo.alg_name, name, sizeof(algo.alg_name));
 
-			fill_and_terminate(algo.alg_name, name,
-					sizeof(algo.alg_name));
-			algo.alg_key_len = sa->enckeylen * BITS_PER_BYTE;
-			algo.alg_icv_len = sa->encrypt->aead_tag_size * BITS_PER_BYTE;
-
+			/*
+			 * Now copy all of XFRM_ALGO_AEAD structure up
+			 * to, but not including, .alg_key[], to
+			 * RTA_DATA(attr), and then append the
+			 * encryption key at .alg_key[]'s offset.
+			 */
 			attr->rta_type = XFRMA_ALG_AEAD;
-			attr->rta_len = RTA_LENGTH(sizeof(algo) + sa->enckeylen);
+			attr->rta_len = RTA_LENGTH(alg_key_offset + sa->enckeylen);
 
-			memcpy(RTA_DATA(attr), &algo, sizeof(algo));
-			memcpy((char *)RTA_DATA(attr) + sizeof(algo),
-				sa->enckey, sa->enckeylen);
+			memcpy(RTA_DATA(attr), &algo, alg_key_offset);
+			memcpy((char *)RTA_DATA(attr) + alg_key_offset, sa->enckey, sa->enckeylen);
 
 			req.n.nlmsg_len += attr->rta_len;
 			attr = (struct rtattr *)((char *)attr + attr->rta_len);
 
 		} else {
-			struct xfrm_algo algo;
+			/*
+			 * Populate XFRM_ALGO structure up to, but not
+			 * including, .alg_key[] using the stack.
+			 * Can't populate RTA_DATA(attr) directly as
+			 * it may not be correctly aligned.
+			 */
+			size_t alg_key_offset = offsetof(struct xfrm_algo, alg_key);
+			struct xfrm_algo algo = {
+				.alg_key_len = sa->enckeylen * BITS_PER_BYTE,
+			};
+			fill_and_terminate(algo.alg_name, name, sizeof(algo.alg_name));
 
-			fill_and_terminate(algo.alg_name, name,
-					sizeof(algo.alg_name));
-			algo.alg_key_len = sa->enckeylen * BITS_PER_BYTE;
-
+			/*
+			 * Now copy all of XFRM_ALGO structure up to,
+			 * but not including, .alg_key[], to
+			 * RTA_DATA(attr), and then append the
+			 * encryption key at .alg_key[]'s offset.
+			 */
 			attr->rta_type = XFRMA_ALG_CRYPT;
-			attr->rta_len = RTA_LENGTH(sizeof(algo) + sa->enckeylen);
-
-			memcpy(RTA_DATA(attr), &algo, sizeof(algo));
-			memcpy((char *)RTA_DATA(attr) + sizeof(algo),
-				sa->enckey,
-			sa->enckeylen);
+			attr->rta_len = RTA_LENGTH(alg_key_offset + sa->enckeylen);
+			memcpy(RTA_DATA(attr), &algo, alg_key_offset);
+			memcpy((char *)RTA_DATA(attr) + alg_key_offset, sa->enckey, sa->enckeylen);
 
 			req.n.nlmsg_len += attr->rta_len;
 			attr = (struct rtattr *)((char *)attr + attr->rta_len);
@@ -1579,7 +1602,7 @@ static bool netlink_add_sa(const struct kernel_sa *sa, bool replace,
 	if (sa->nic_offload_dev) {
 		struct xfrm_user_offload xuo = {
 			.flags = ((sa->inbound ? XFRM_OFFLOAD_INBOUND : 0) |
-				  (address_type(sa->src.address) == &ipv6_info ? XFRM_OFFLOAD_IPV6 : 0)),
+				  (address_info(sa->src.address) == &ipv6_info ? XFRM_OFFLOAD_IPV6 : 0)),
 			.ifindex = if_nametoindex(sa->nic_offload_dev),
 		};
 
@@ -1678,7 +1701,7 @@ static bool xfrm_del_ipsec_spi(ipsec_spi_t spi,
 static struct ip_bytes bytes_from_xfrm_address(const struct ip_info *afi,
 					       const xfrm_address_t *xaddr)
 {
-	struct ip_bytes bytes = unset_bytes; /* "zero" it & set type */
+	struct ip_bytes bytes = unset_ip_bytes; /* "zero" it & set type */
 	memcpy(&bytes, xaddr, afi->ip_size);
 	return bytes;
 }
@@ -1934,6 +1957,77 @@ static void process_addr_chage(struct nlmsghdr *n, struct logger *logger)
 		rta = RTA_NEXT(rta, msg_size);
 	}
 }
+static void netlink_kernel_sa_expire(struct nlmsghdr *n, struct logger *logger)
+{
+	struct xfrm_user_expire *ue = NLMSG_DATA(n);
+
+	if (n->nlmsg_len < NLMSG_LENGTH(sizeof(*ue))) {
+		llog(RC_LOG_SERIOUS, logger,
+			"netlink_expire got message with length %zu < %zu bytes; ignore message",
+			(size_t) n->nlmsg_len, sizeof(*ue));
+		return;
+	}
+
+	const struct ip_info *afi = aftoinfo(ue->state.family);
+	if (afi == NULL) {
+		llog(RC_LOG, logger,
+		     "kernel: XFRM_MSG_EXPIRE message malformed: family %u unknown",
+		     ue->state.family);
+		return;
+	}
+
+	const ip_protocol *protocol = protocol_by_ipproto(ue->state.id.proto);
+	if (protocol == NULL) {
+		llog(RC_LOG, logger,
+		      "XFRM_MSG_EXPIRE message from kernel malformed: protocol %u unknown",
+		       ue->state.id.proto);
+		return;
+	}
+
+	ip_address src, dst;
+	address_buf a;
+	address_buf b;
+	xfrm2ip(&ue->state.saddr, &src, ue->state.family);
+	xfrm2ip(&ue->state.id.daddr, &dst, ue->state.family);
+	dbg("%s spi 0x%x src %s dst %s %s mode %u proto %d bytes %"PRIu64" packets %"PRIu64"%s",
+	    __func__, ntohl(ue->state.id.spi),
+	    str_address(&src, &a), str_address(&dst, &b), ue->hard ? "hard" : "soft",
+	    ue->state.mode, ue->state.id.proto,
+	    /* XXX: on linux __u64 is either long, or long long
+	     * conflicting with either PRIu64 or %ll */
+	    (uint64_t) ue->state.curlft.bytes,
+	    (uint64_t) ue->state.curlft.packets,
+	    (ue->state.id.spi == 0 ? " ACQUIRE state expired discard this message" : ""))
+
+	uint8_t protoid = PROTO_RESERVED;
+	switch (ue->state.id.proto) {
+	case  IPPROTO_ESP:
+		protoid = PROTO_IPSEC_ESP;
+		break;
+	case  IPPROTO_AH:
+		protoid = PROTO_IPSEC_AH;
+		break;
+	case  IPPROTO_COMP:
+		protoid = PROTO_IPCOMP;
+		break;
+	default:
+		bad_case(ue->state.id.proto);
+	}
+
+	if ((ue->hard && impair.ignore_hard_expire) ||
+	    (!ue->hard && impair.ignore_soft_expire)) {
+		dbg("IMPAIR is supress a %s EXPIRE event",
+		    ue->hard ? "hard" : "soft");
+	}
+
+	if (ue->state.id.spi == 0)
+		return;  /* acquire state with SPI 0x0 expired, ignore it */
+
+	handle_sa_expire(ue->state.id.spi, protoid, &dst,
+			ue->hard, ue->state.curlft.bytes,
+			ue->state.curlft.packets,
+			ue->state.curlft.add_time);
+}
 
 static void netlink_policy_expire(struct nlmsghdr *n, struct logger *logger)
 {
@@ -1955,7 +2049,7 @@ static void netlink_policy_expire(struct nlmsghdr *n, struct logger *logger)
 	 */
 	const struct xfrm_user_polexpire *upe = /* insufficiently aligned */
 		nlmsg_data(n, sizeof(*upe), logger, HERE);
-	if (upe != NULL) {
+	if (upe == NULL) {
 		return;
 	}
 
@@ -2009,54 +2103,6 @@ static void netlink_policy_expire(struct nlmsghdr *n, struct logger *logger)
 	}
 }
 
-static void netlink_expire(struct nlmsghdr *n, struct logger *logger)
-{
-	/*
-	 * WARNING: netlink only guarantees 32-bit alignment.
-	 * See NLMSG_ALIGNTO in the kernel's include/uapi/linux/netlink.h.
-	 * BUT some fields in struct xfrm_user_acquire are 64-bit and so access
-	 * may be improperly aligned.  This will fail on a few strict
-	 * architectures (it does break C rules).
-	 *
-	 * WARNING: this code's understanding to the XFRM netlink
-	 * messages is from programs/pluto/linux26/xfrm.h.
-	 * There is no guarantee that this matches the kernel's
-	 * understanding.
-	 *
-	 * Many things are defined to be int or unsigned int.
-	 * This isn't safe when the kernel and userland may
-	 * be compiled with different models.
-	 */
-	const struct xfrm_user_expire *expire = /* insufficiently aligned */
-		nlmsg_data(n, sizeof(*expire), logger, HERE);
-	if (expire == NULL) {
-		return;
-	}
-
-	const struct ip_info *afi = aftoinfo(expire->state.family);
-	if (afi == NULL) {
-		llog(RC_LOG, logger,
-		     "kernel: XFRM_MSG_EXPIRE message malformed: family %u unknown",
-		     expire->state.family);
-		return;
-	}
-
-	const ip_protocol *protocol = protocol_by_ipproto(expire->state.id.proto);
-	if (protocol == NULL) {
-		llog(RC_LOG, logger,
-		     "XFRM_MSG_EXPIRE message from kernel malformed: protocol %u unknown",
-		     expire->state.id.proto);
-		return;
-	}
-
-	ip_address daddr = address_from_xfrm(afi, &expire->state.id.daddr);
-
-	address_buf b;
-	dbg("kernel: expire: protocol %s dest %s SPI "PRI_IPSEC_SPI,
-	    protocol->name, str_address(&daddr, &b),
-	    pri_ipsec_spi(expire->state.id.spi));
-}
-
 /* returns FALSE iff EAGAIN */
 static bool netlink_get(int fd, struct logger *logger)
 {
@@ -2071,9 +2117,7 @@ static bool netlink_get(int fd, struct logger *logger)
 			return false;
 
 		if (errno != EINTR) {
-			log_errno(logger, errno,
-				  "kernel: recvfrom() failed in netlink_get: errno(%d): %s",
-				  errno, strerror(errno));
+			llog_error(logger, errno, "kernel: recvfrom() failed in netlink_get");
 		}
 		return true;
 	} else if ((size_t)r < sizeof(rsp.n)) {
@@ -2096,18 +2140,21 @@ static bool netlink_get(int fd, struct logger *logger)
 	}
 
 	sparse_buf sb;
-	dbg("kernel: netlink_get: %s message",
-	    str_sparse(xfrm_type_names, rsp.n.nlmsg_type, &sb));
+	dbg("kernel: netlink_get: %s message with legth %zu",
+	    str_sparse(xfrm_type_names, rsp.n.nlmsg_type, &sb),
+	    (size_t) rsp.n.nlmsg_len);
 
 	switch (rsp.n.nlmsg_type) {
 	case XFRM_MSG_ACQUIRE:
 		netlink_acquire(&rsp.n, logger);
 		break;
+
+	case XFRM_MSG_EXPIRE: /* SA soft and hard limit */
+		netlink_kernel_sa_expire(&rsp.n, logger);
+		break;
+
 	case XFRM_MSG_POLEXPIRE:
 		netlink_policy_expire(&rsp.n, logger);
-		break;
-	case XFRM_MSG_EXPIRE:
-		netlink_expire(&rsp.n, logger);
 		break;
 
 	case RTM_NEWADDR:
@@ -2135,7 +2182,6 @@ static ipsec_spi_t xfrm_get_ipsec_spi(ipsec_spi_t avoid UNUSED,
 				      const ip_address *src,
 				      const ip_address *dst,
 				      const struct ip_protocol *proto,
-				      bool tunnel_mode,
 				      reqid_t reqid,
 				      uintmax_t min, uintmax_t max,
 				      const char *story,
@@ -2153,7 +2199,7 @@ static ipsec_spi_t xfrm_get_ipsec_spi(ipsec_spi_t avoid UNUSED,
 
 	req.spi.info.saddr = xfrm_from_address(src);
 	req.spi.info.id.daddr = xfrm_from_address(dst);
-	req.spi.info.mode = tunnel_mode;
+	req.spi.info.mode = 0;/*transport mode*/
 	req.spi.info.reqid = reqid;
 	req.spi.info.id.proto = proto->ipproto;
 	req.spi.info.family = address_type(src)->af;
@@ -2203,10 +2249,10 @@ static bool netlink_get_sa(const struct kernel_sa *sa, uint64_t *bytes,
 	req.n.nlmsg_flags = NLM_F_REQUEST;
 	req.n.nlmsg_type = XFRM_MSG_GETSA;
 
-	req.id.daddr = xfrm_from_address(sa->dst.address);
+	req.id.daddr = xfrm_from_address(&sa->dst.address);
 
 	req.id.spi = sa->spi;
-	req.id.family = address_type(sa->src.address)->af;
+	req.id.family = address_info(sa->src.address)->af;
 	req.id.proto = sa->proto->ipproto;
 
 	req.n.nlmsg_len = NLMSG_ALIGN(NLMSG_LENGTH(sizeof(req.id)));
@@ -2341,19 +2387,11 @@ static bool qry_xfrm_mirgrate_support(struct nlmsghdr *hdr, struct logger *logge
 	size_t len;
 	ssize_t r;
 	struct sockaddr_nl addr;
-	int nl_fd = socket(AF_NETLINK, SOCK_DGRAM, NETLINK_XFRM);
+	int nl_fd = cloexec_socket(AF_NETLINK, SOCK_DGRAM|SOCK_NONBLOCK, NETLINK_XFRM);
 
 	if (nl_fd < 0) {
-		log_errno(logger, errno,
-			  "socket() in qry_xfrm_mirgrate_support()");
-		return false;
-	}
-
-	if (fcntl(nl_fd, F_SETFL, O_NONBLOCK) != 0) {
-		log_errno(logger, errno,
-			  "fcntl(O_NONBLOCK in qry_xfrm_mirgrate_support()");
-		close(nl_fd);
-
+		llog_error(logger, errno,
+			   "socket() in qry_xfrm_mirgrate_support()");
 		return false;
 	}
 
@@ -2363,13 +2401,13 @@ static bool qry_xfrm_mirgrate_support(struct nlmsghdr *hdr, struct logger *logge
 		r = write(nl_fd, hdr, len);
 	} while (r < 0 && errno == EINTR);
 	if (r < 0) {
-		log_errno(logger, errno,
-			  "netlink write() xfrm_migrate_support lookup");
+		llog_error(logger, errno,
+			   "netlink write() xfrm_migrate_support lookup");
 		close(nl_fd);
 		return false;
 	} else if ((size_t)r != len) {
-		llog(RC_LOG_SERIOUS, logger,
-			    "ERROR: netlink write() xfrm_migrate_support message truncated: %zd instead of %zu",
+		llog_error(logger, 0/*no-errno*/,
+			   "netlink write() xfrm_migrate_support message truncated: %zd instead of %zu",
 			    r, len);
 		close(nl_fd);
 		return false;
@@ -2442,37 +2480,39 @@ static err_t netlink_migrate_sa_check(struct logger *logger)
 	}
 }
 
-static bool netlink_poke_ipsec_policy_hole(const struct iface_dev *ifd, int fd, struct logger *logger)
+static bool netlink_poke_ipsec_policy_hole(int fd, const struct ip_info *afi, struct logger *logger)
 {
-	const struct ip_info *type = address_type(&ifd->id_address);
+	int af = afi->af;
 	struct xfrm_userpolicy_info policy = {
 		.action = XFRM_POLICY_ALLOW,
-		.sel = {
-			.family = type->af,
-		}
+		.sel.family = af,
 	};
 
 	int opt, sol;
-
-	if (type == &ipv6_info) {
-		sol = IPPROTO_IPV6;
-		opt = IPV6_XFRM_POLICY;
-	} else {
+	switch (af) {
+	case AF_INET:
 		sol = SOL_IP;
 		opt = IP_XFRM_POLICY;
+		break;
+	case AF_INET6:
+		sol = IPPROTO_IPV6;
+		opt = IPV6_XFRM_POLICY;
+		break;
+	default:
+		bad_case(af);
 	}
 
 	policy.dir = XFRM_POLICY_IN;
 	if (setsockopt(fd, sol, opt, &policy, sizeof(policy)) < 0) {
-		log_errno(logger, errno,
-			  "setsockopt IP_XFRM_POLICY XFRM_POLICY_IN in process_raw_ifaces()");
+		llog_error(logger, errno,
+			   "setsockopt IP_XFRM_POLICY XFRM_POLICY_IN in process_raw_ifaces()");
 		return false;
 	}
 
 	policy.dir = XFRM_POLICY_OUT;
 	if (setsockopt(fd, sol, opt, &policy, sizeof(policy)) < 0) {
-		log_errno(logger, errno,
-			  "setsockopt IP_XFRM_POLICY XFRM_POLICY_OUT in process_raw_ifaces()");
+		llog_error(logger, errno,
+			   "setsockopt IP_XFRM_POLICY XFRM_POLICY_OUT in process_raw_ifaces()");
 		return false;
 	}
 
@@ -2487,7 +2527,8 @@ const struct kernel_ops xfrm_kernel_ops = {
 	.updown_name = "xfrm",
 	.async_fdp = &nl_xfrm_fd,
 	.route_fdp = &nl_route_fd,
-	.replay_window = IPSEC_SA_DEFAULT_REPLAY_WINDOW,
+	/* don't overflow BYTES_FOR_BITS(replay_window) * 8 */
+	.max_replay_window = UINT32_MAX & ~7,
 	.esn_supported = true,
 
 	.init = init_netlink,
@@ -2504,7 +2545,6 @@ const struct kernel_ops xfrm_kernel_ops = {
 	.grp_sa = NULL,
 	.get_ipsec_spi = xfrm_get_ipsec_spi,
 	.del_ipsec_spi = xfrm_del_ipsec_spi,
-	.exceptsocket = NULL,
 	.migrate_sa_check = netlink_migrate_sa_check,
 	.migrate_ipsec_sa = xfrm_migrate_ipsec_sa,
 	.overlap_supported = false,

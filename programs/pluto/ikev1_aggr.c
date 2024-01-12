@@ -55,6 +55,7 @@
 #include "ikev1_peer_id.h"
 #include "peer_id.h"	/* for update_peer_id_cert() */
 #include "ikev1_vendorid.h"
+#include "ikev1_cert.h"
 
 /* STATE_AGGR_R0: HDR, SA, KE, Ni, IDii
  *           --> HDR, SA, KE, Nr, IDir, HASH_R/SIG_R
@@ -168,7 +169,7 @@ stf_status aggr_inI1_outR1(struct state *null_st UNUSED,
 	/* Set up state */
 	struct ike_sa *ike = new_v1_rstate(c, md);
 	md->v1_st = &ike->sa;  /* (caller will reset cur_state) */
-	change_v1_state(&ike->sa, STATE_AGGR_R1);
+	change_v1_state(&ike->sa, STATE_AGGR_R0);
 
 	/*
 	 * Warn when peer is expected to use especially dangerous
@@ -196,7 +197,8 @@ stf_status aggr_inI1_outR1(struct state *null_st UNUSED,
 
 	if (!v1_decode_certs(md)) {
 		llog_sa(RC_LOG, ike, "X509: CERT payload bogus or revoked");
-		return false;
+		/* XXX notification is in order! */
+		return STF_FAIL_v1N + v1N_INVALID_ID_INFORMATION;
 	}
 
 	/*
@@ -270,8 +272,7 @@ stf_status aggr_inI1_outR1(struct state *null_st UNUSED,
 
 	/* calculate KE and Nonce */
 	submit_ke_and_nonce(&ike->sa, ike->sa.st_oakley.ta_dh,
-			    aggr_inI1_outR1_continue1,
-			    "outI2 KE");
+			    aggr_inI1_outR1_continue1, HERE);
 	return STF_SUSPEND;
 }
 
@@ -297,20 +298,16 @@ static stf_status aggr_inI1_outR1_continue2(struct state *st,
 
 	/* decode certificate requests */
 	decode_v1_certificate_requests(st, md);
-
-	if (st->st_requested_ca != NULL)
-		st->hidden_variables.st_v1_got_certrequest = true;
+	bool cert_requested = (st->st_v1_requested_ca != NULL);
 
 	/*
 	 * send certificate if we have one and auth is RSA, and we were
 	 * told we can send one if asked, and we were asked, or we were told
 	 * to always send one.
 	 */
-	bool send_cert = (st->st_oakley.auth == OAKLEY_RSA_SIG &&
-			  mycert != NULL &&
-			  ((c->local->config->host.sendcert == CERT_SENDIFASKED &&
-			    st->hidden_variables.st_v1_got_certrequest) ||
-			   c->local->config->host.sendcert == CERT_ALWAYSSEND));
+	bool send_cert = (st->st_oakley.auth == OAKLEY_RSA_SIG && mycert != NULL &&
+			  ((c->local->config->host.sendcert == CERT_SENDIFASKED && cert_requested) ||
+			   (c->local->config->host.sendcert == CERT_ALWAYSSEND)));
 
 	bool send_authcerts = (send_cert && c->send_ca != CA_SEND_NONE);
 
@@ -331,8 +328,7 @@ static stf_status aggr_inI1_outR1_continue2(struct state *st,
 	}
 
 	doi_log_cert_thinking(st->st_oakley.auth, cert_ike_type(mycert),
-			      c->local->config->host.sendcert,
-			      st->hidden_variables.st_v1_got_certrequest,
+			      c->local->config->host.sendcert, cert_requested,
 			      send_cert, send_authcerts);
 
 	/* send certificate request, if we don't have a preloaded RSA public key */
@@ -621,20 +617,16 @@ static stf_status aggr_inR1_outI2_crypto_continue(struct state *st,
 
 	/* decode certificate requests */
 	decode_v1_certificate_requests(st, md);
-
-	if (st->st_requested_ca != NULL)
-		st->hidden_variables.st_v1_got_certrequest = true;
+	bool cert_requested = (st->st_v1_requested_ca != NULL);
 
 	/*
 	 * send certificate if we have one and auth is RSA, and we were
 	 * told we can send one if asked, and we were asked, or we were told
 	 * to always send one.
 	 */
-	bool send_cert = (st->st_oakley.auth == OAKLEY_RSA_SIG &&
-			  mycert != NULL &&
-			  ((c->local->config->host.sendcert == CERT_SENDIFASKED &&
-			    st->hidden_variables.st_v1_got_certrequest) ||
-			   c->local->config->host.sendcert == CERT_ALWAYSSEND));
+	bool send_cert = (st->st_oakley.auth == OAKLEY_RSA_SIG && mycert != NULL &&
+			  ((c->local->config->host.sendcert == CERT_SENDIFASKED && cert_requested) ||
+			   (c->local->config->host.sendcert == CERT_ALWAYSSEND)));
 
 	bool send_authcerts = (send_cert && c->send_ca != CA_SEND_NONE);
 
@@ -655,8 +647,7 @@ static stf_status aggr_inR1_outI2_crypto_continue(struct state *st,
 	}
 
 	doi_log_cert_thinking(st->st_oakley.auth, cert_ike_type(mycert),
-			      c->local->config->host.sendcert,
-			      st->hidden_variables.st_v1_got_certrequest,
+			      c->local->config->host.sendcert, cert_requested,
 			      send_cert, send_authcerts);
 
 	/**************** build output packet: HDR, HASH_I/SIG_I **************/
@@ -1040,8 +1031,7 @@ void aggr_outI1(struct fd *whack_sock,
 	 * Calculate KE and Nonce.
 	 */
 	submit_ke_and_nonce(&ike->sa, ike->sa.st_oakley.ta_dh,
-			    aggr_outI1_continue,
-			    "aggr_outI1 KE + nonce");
+			    aggr_outI1_continue, HERE);
 	statetime_stop(&start, "%s()", __func__);
 }
 

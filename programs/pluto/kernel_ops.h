@@ -20,6 +20,7 @@
 
 /*kernel_ops_policy() kernel_ops_spd()? */
 extern bool raw_policy(enum kernel_policy_op op,
+		       enum kernel_policy_dir dir,
 		       enum expect_kernel_policy expect_kernel_policy,
 		       const ip_selector *this_client,
 		       const ip_selector *that_client,
@@ -31,7 +32,7 @@ extern bool raw_policy(enum kernel_policy_op op,
 		       const struct pluto_xfrmi *xfrmi,
 		       const shunk_t sec_label,
 		       struct logger *logger,
-		       const char *fmt, ...) PRINTF_LIKE(13);
+		       const char *fmt, ...) PRINTF_LIKE(14);
 
 /*kernel_ops_state()? kernel_ops_sad()?*/
 bool kernel_ops_add_sa(const struct kernel_sa *sa,
@@ -42,7 +43,6 @@ ipsec_spi_t kernel_ops_get_ipsec_spi(ipsec_spi_t avoid,
 				     const ip_address *src,
 				     const ip_address *dst,
 				     const struct ip_protocol *proto,
-				     bool tunnel_mode,
 				     reqid_t reqid,
 				     uintmax_t min, uintmax_t max,
 				     const char *story,	/* often SAID string */

@@ -63,6 +63,16 @@ bool record_v2_delete(struct ike_sa *ike, struct state *st)
 			};
 		}
 
+		if (impair.v2_delete_protoid > 0) {
+			enum_buf ebo, ebn;
+			enum ikev2_sec_proto_id protoid = impair.v2_delete_protoid - 1; /* unbias */
+			llog(RC_LOG, st->st_logger, "IMPAIR: changing Delete payload Protocol ID from %s to %s (%u)",
+			     str_enum_short(&ikev2_delete_protocol_id_names, v2del_tmp.isad_protoid, &ebo),
+			     str_enum_short(&ikev2_delete_protocol_id_names, protoid, &ebn),
+			     protoid);
+			v2del_tmp.isad_protoid = protoid;
+		}
+
 		/* Emit delete payload header out */
 		if (!out_struct(&v2del_tmp, &ikev2_delete_desc,
 				request.pbs, &del_pbs))
@@ -70,10 +80,9 @@ bool record_v2_delete(struct ike_sa *ike, struct state *st)
 
 		/* Emit values of spi to be sent to the peer */
 		if (IS_CHILD_SA(st)) {
-			diag_t d = pbs_out_raw(&del_pbs, &st->st_esp.our_spi,
-					       sizeof(ipsec_spi_t), "local spis");
-			if (d != NULL) {
-				llog_diag(RC_LOG_SERIOUS, st->st_logger, &d, "%s", "");
+			if (!pbs_out_raw(&del_pbs, &st->st_esp.inbound.spi,
+					 sizeof(ipsec_spi_t), "local spis")) {
+				/* already logged */
 				return false;
 			}
 		}
@@ -321,7 +330,7 @@ bool process_v2D_requests(bool *del_ike, struct ike_sa *ike, struct msg_digest *
 						 ? &child->sa.st_ah
 						 : &child->sa.st_esp);
 					if (j < elemsof(spi_buf)) {
-						spi_buf[j] = pr->our_spi;
+						spi_buf[j] = pr->inbound.spi;
 						j++;
 					} else {
 						log_state(RC_LOG, &ike->sa,
@@ -347,12 +356,9 @@ bool process_v2D_requests(bool *del_ike, struct ike_sa *ike, struct msg_digest *
 					pbs,
 					&del_pbs))
 				return false;
-			diag_t d = pbs_out_raw(&del_pbs,
-					       spi_buf,
-					       j * sizeof(spi_buf[0]),
-					       "local SPIs");
-			if (d != NULL) {
-				llog_diag(RC_LOG_SERIOUS, ike->sa.st_logger, &d, "%s", "");
+			if (!pbs_out_raw(&del_pbs, spi_buf,
+					 j * sizeof(spi_buf[0]), "local SPIs")) {
+				/* already logged */
 				return false;
 			}
 

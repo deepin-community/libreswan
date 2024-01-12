@@ -24,7 +24,7 @@ west #
 002 "west-east" #1: initiating IKEv1 Aggressive Mode connection
 1v1 "west-east" #1: sent Aggressive Mode request
 002 "west-east" #1: Peer ID is ID_FQDN: '@east'
-003 "west-east" #1: authenticated using RSA with SHA1 and preloaded certificate '@east'
+003 "west-east" #1: authenticated peer '2nnn-bit RSA with SHA1' signature using preloaded certificate '@east'
 004 "west-east" #1: IKE SA established {auth=RSA_SIG cipher=3DES_CBC_192 integ=HMAC_SHA1 group=MODP1536}
 002 "west-east" #2: initiating Quick Mode IKEv1+RSASIG+ENCRYPT+TUNNEL+PFS+UP+AGGRESSIVE+IKE_FRAG_ALLOW+ESN_NO+ESN_YES
 1v1 "west-east" #2: sent Quick Mode request
@@ -38,7 +38,7 @@ west #
  # show the tunnel!
 west #
  ipsec whack --trafficstatus
-006 #2: "west-east", type=ESP, add_time=1234567890, inBytes=84, outBytes=84, id='@east'
+006 #2: "west-east", type=ESP, add_time=1234567890, inBytes=84, outBytes=84, maxBytes=2^63B, id='@east'
 west #
  # Let R_U_THERE packets flow
 west #
@@ -63,13 +63,13 @@ west #
  # wait for tunnel to come back up
 west #
  ../../guestbin/wait-for.sh --match 'west-east' -- ipsec whack --trafficstatus
-006 #4: "west-east", type=ESP, add_time=1234567890, inBytes=0, outBytes=0, id='@east'
+006 #4: "west-east", type=ESP, add_time=1234567890, inBytes=0, outBytes=0, maxBytes=2^63B, id='@east'
 west #
  ../../guestbin/ping-once.sh --up -I 192.1.2.45 192.1.2.23
 up
 west #
  ipsec whack --trafficstatus
-006 #4: "west-east", type=ESP, add_time=1234567890, inBytes=84, outBytes=84, id='@east'
+006 #4: "west-east", type=ESP, add_time=1234567890, inBytes=84, outBytes=84, maxBytes=2^63B, id='@east'
 west #
  echo done
 done
@@ -110,7 +110,13 @@ src 192.1.2.45/32 dst 192.1.2.23/32
 		proto esp reqid REQID mode tunnel
 XFRM done
 IPSEC mangle TABLES
-NEW_IPSEC_CONN mangle TABLES
+iptables filter TABLE
+Chain INPUT (policy ACCEPT)
+target     prot opt source               destination         
+Chain FORWARD (policy ACCEPT)
+target     prot opt source               destination         
+Chain OUTPUT (policy ACCEPT)
+target     prot opt source               destination         
 ROUTING TABLES
 default via 192.1.2.254 dev eth1
 192.0.1.0/24 dev eth0 proto kernel scope link src 192.0.1.254

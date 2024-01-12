@@ -23,6 +23,8 @@
 # error this file should only be compiled when DNSSEC is defined
 #endif
 
+#include "ttodata.h"
+
 #include "defs.h"
 #include "log.h"
 #include <ldns/ldns.h>		/* rpm:ldns-devel deb:libldns-dev */
@@ -32,9 +34,6 @@
 #include "dnssec.h"    /* includes unbound.h */
 #include "ikev2_ipseckey.h" /* for dns_status */
 #include "ikev2_ipseckey_dnsr.h"
-
-/* Do not include secrets.h as it will cause conflicts via NSS/OPENSSL headers */
-extern const struct pubkey_type pubkey_type_rsa;
 
 struct p_dns_req *pluto_dns_list = NULL; /* DNS queries linked list */
 
@@ -105,8 +104,10 @@ static void dbg_log_dns_question(struct p_dns_req *dnsr,
  *	3: gateway is a domain name
  * Algorithm: decimal rep of 8 bits
  *	0: no key
- *	1: DSA key (see RFC 2536)
- *	2: RSA key (see RFC 3110) [we require this]
+ *	1: DSA key     RFC 2536  reject
+ *	2: RSA key     RFC 3110  accept
+ *	3: ECDSA key   RFC 6605  accept
+ *      4: PUBLIC KEY  RFC xxxx  accept
  * Gateway: no gateway is denoted "." [we require this]
  * Public Key Block: bb64-encoded [we require this]
  *
@@ -121,9 +122,13 @@ static void dbg_log_dns_question(struct p_dns_req *dnsr,
 
 /*
  * next_rr_field:
- * A lot like strspn(stringp, " \t"), except that it ignores any amount
- * of whitespace before a field.  This means that empty fields are not
- * possible.
+ *
+ * A lot like strspn(stringp, " \t"), except that it ignores any
+ * amount of whitespace before a field.  This means that empty fields
+ * are not possible.
+ *
+ * Danger: strsep() is blatting STRINGP with NULs that terminating the
+ * fields that it finds.
  */
 static char *next_rr_field(char **stringp)
 {
@@ -153,7 +158,7 @@ static bool extract_dns_pubkey(struct p_dns_req *dnsr, ldns_rdf *rdf, uint32_t t
 
 	(void) next_rr_field(&rrcursor);	/* Precedence (ignore) */
 	const char *gwt = next_rr_field(&rrcursor);	/* Gateway Type */
-	const char *algt = next_rr_field(&rrcursor);	/* Algorithm Type */
+	const char *algorithm_type_str = next_rr_field(&rrcursor);
 	const char *gw = next_rr_field(&rrcursor);	/* Gateway */
 	const char *pubkey = next_rr_field(&rrcursor);	/* Public Key Block */
 	const char *trailer = next_rr_field(&rrcursor);	/* whatever is left over */
@@ -165,7 +170,7 @@ static bool extract_dns_pubkey(struct p_dns_req *dnsr, ldns_rdf *rdf, uint32_t t
 	 * exits.
 	 */
 
-	err_t ugh;
+	err_t ugh = NULL;
 
 	do {
 		if (pubkey == NULL) {
@@ -180,29 +185,49 @@ static bool extract_dns_pubkey(struct p_dns_req *dnsr, ldns_rdf *rdf, uint32_t t
 			ugh = "Gateway Type must be 0";
 			break;
 		}
-		if (!streq(algt + strspn(algt, "0"), "2")) {
-			ugh = "Algorithm type must be 2 (RSA)";
+
+		errno = 0;
+		unsigned algorithm_type = strtoul(algorithm_type_str, NULL, 10);
+		if (errno != 0) {
+			ugh = "invalid Algorithm Type";
 			break;
 		}
+
+		dbg("algorithm type '%s' is %d", algorithm_type_str, algorithm_type);
+		switch (algorithm_type) {
+		case IPSECKEY_ALGORITHM_RSA:
+		case IPSECKEY_ALGORITHM_ECDSA:
+		case IPSECKEY_ALGORITHM_X_PUBKEY:
+			break;
+		default:
+			ugh = "Algorithm type must be 2 (RSA) 3 (ECDSA) or 4 (PUBKEY draft)";
+			break;
+		}
+		if (ugh != NULL) {
+			break;
+		}
+
 		if (!streq(gw, ".")) {
 			ugh = "Gateway must be `.'";
 			break;
 		}
 
-		/* over-allocate space to hold the key */
-		size_t len = strlen(pubkey);
-		struct dns_pubkey *dns_pubkey = alloc_bytes(sizeof(struct dns_pubkey) + len,
-							    "temp pubkey bin store");
-		dns_pubkey->type = &pubkey_type_rsa;
+		/*
+		 * over-allocate structure so that there is space for
+		 * the key.
+		 */
+		size_t pubkey_len = strlen(pubkey); /* over estimate; decoded is less */
+		struct dns_pubkey *dns_pubkey = over_alloc_thing(struct dns_pubkey, pubkey_len);
+		dns_pubkey->algorithm_type = algorithm_type;
 		dns_pubkey->ttl = ttl;
-
-		char err_buf[TTODATAV_BUF];
-		ugh = ttodatav(pubkey, len, 64, (char*)dns_pubkey->ptr, len, &dns_pubkey->len,
-			       err_buf, sizeof(err_buf), 0);
+		/* store the pubkey after the struct */
+		char *pubkey_ptr = (void*)(dns_pubkey+1);
+		ugh = ttodata(pubkey, pubkey_len, 64, pubkey_ptr, pubkey_len, &pubkey_len);
 		if (ugh != NULL) {
 			pfree(dns_pubkey);
 			break;
 		}
+		dns_pubkey->pubkey = shunk2(pubkey_ptr, pubkey_len);
 
 		/*
 		 * Sort the keys before inserting; sort key is
@@ -218,11 +243,7 @@ static bool extract_dns_pubkey(struct p_dns_req *dnsr, ldns_rdf *rdf, uint32_t t
 		 */
 		while (*dns_pubkeys != NULL) {
 			/* XXX: hunk_cmp()!?! */
-			if (memcmp((*dns_pubkeys)->ptr, dns_pubkey->ptr,
-				   min((*dns_pubkeys)->len, dns_pubkey->len)) < 0) {
-				break;
-			}
-			if ((*dns_pubkeys)->len < dns_pubkey->len) {
+			if (hunk_cmp((*dns_pubkeys)->pubkey, dns_pubkey->pubkey) < 0) {
 				break;
 			}
 			dns_pubkeys = &(*dns_pubkeys)->next;

@@ -72,7 +72,7 @@ static void compute_ke_and_nonce(struct logger *logger,
 				task->dh->common.fqn, task->local_secret);
 		}
 	}
-	task->nonce = get_rnd_chunk(DEFAULT_NONCE_SIZE, "nonce");
+	task->nonce = alloc_rnd_chunk(DEFAULT_NONCE_SIZE, "nonce");
 	if (DBGP(DBG_CRYPT)) {
 		DBG_dump_hunk("Generated nonce:", task->nonce);
 	}
@@ -103,12 +103,12 @@ static const struct task_handler ke_and_nonce_handler = {
 };
 
 void submit_ke_and_nonce(struct state *st, const struct dh_desc *dh,
-			 ke_and_nonce_cb *cb, const char *name)
+			 ke_and_nonce_cb *cb, where_t where)
 {
 	struct task *task = alloc_thing(struct task, "dh");
 	task->dh = dh;
 	task->cb = cb;
-	submit_task(st->st_logger, st, task, &ke_and_nonce_handler, name);
+	submit_task(st->st_logger, st, task, &ke_and_nonce_handler, where);
 }
 
 /*
@@ -147,7 +147,7 @@ void unpack_KE_from_helper(struct state *st, struct dh_local_secret *local_secre
 			group == st->st_oakley.ta_dh ? "match" : "differ");
 	}
 
-	replace_chunk(g, clone_dh_local_secret_ke(local_secret));
+	replace_chunk(g, clone_hunk(dh_local_secret_ke(local_secret), "KE"));
 	pexpect(st->st_dh_local_secret == NULL);
 	st->st_dh_local_secret = dh_local_secret_addref(local_secret, HERE);
 }

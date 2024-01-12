@@ -17,7 +17,8 @@ func debug(line) {
 #
 # PATTERN has the form "(NAME) ... (VALUE)"
 #
-func find(name, pattern,  n, fields, nr_fields, field, value) {
+func find(name, pattern,
+	  n, fields, nr_fields, field, value) {
     # extract parts of the line matching pattern
     debug("find: pattern: " pattern)
     nr_fields = patsplit($0, fields, pattern)
@@ -57,12 +58,19 @@ func find(name, pattern,  n, fields, nr_fields, field, value) {
     find("CKAID", "CKAID: ([0-9a-f]+)")
     # < 0> rsa      01de34c675160eb6aa7f74b6430d8637d75c4674   east
     find("CKAID", "< *[0-9]+> rsa *([+=0-9a-zA-Z/]+)")
+    find("CKAID", "ckaid=([+=0-9a-zA-Z/]+)")
 
-    find("RSASIGKEY", "rsasigkey=(0s[+=0-9a-zA-Z/]+)")
+    find("RAW-PUBKEY", "rsasigkey=0s([+=0-9a-zA-Z/]+)")
+    find("RAW-PUBKEY", "ecdsakey=0s([+=0-9a-zA-Z/]+)")
+    find("PEM-PUBKEY", "pubkey=([+=0-9a-zA-Z/]+)")
+
+    # RSA's algorithm is 2; ECDSA is 3; 4 is made up
+    find("RAW-PUBKEY", "IPSECKEY +[0-9]+ +[0-9]+ +[23] +[.:0-9a-f]+ +([+=0-9a-zA-Z/]+)$")
+    find("PEM-PUBKEY", "IPSECKEY +[0-9]+ +[0-9]+ +4 +[.:0-9a-f]+ +([+=0-9a-zA-Z/]+)$")
 
     find("KEYID", "keyid: ([+=0-9a-zA-Z/]+)")
-
-    find("PUBKEY", "pubkey=(0s[+=0-9a-zA-Z/]+)")
+    find("KEYID", "# ecdsakey ([+=0-9a-zA-Z/]+)")
+    find("KEYID", "# rsakey ([+=0-9a-zA-Z/]+)")
 
     # replace all IDs with symbolic values
     old = $0
@@ -70,7 +78,7 @@ func find(name, pattern,  n, fields, nr_fields, field, value) {
 	name = values[value]
 	debug("value: " value)
 	debug("name: " name)
-	new = gensub("([ ='])(" value ")([ ']|$)", "\\1" name "\\3", "g", old)
+	new = gensub("( |=0s|=)(" value ")([ ']|$)", "\\1" name "\\3", "g", old)
 	debug("old: " old)
 	debug("new: " new)
 	old = new

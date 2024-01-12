@@ -25,7 +25,6 @@
  */
 
 #include <sys/types.h>
-#include <sys/socket.h>
 #include <sys/un.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -33,18 +32,13 @@
 #include <unistd.h>
 #include <errno.h>
 
-#include "sysdep.h"
+#include "lsw_socket.h"
+
+#include "ttodata.h"
 
 #include "ipsecconf/starterwhack.h"
 #include "ipsecconf/confread.h"
 #include "ipsecconf/starterlog.h"
-
-#include "socketwrapper.h"
-
-#ifndef _LIBRESWAN_H
-#include <libreswan.h>	/* FIXME: ugly include lines */
-#include "constants.h"
-#endif
 
 #include "lswalloc.h"
 #include "lswlog.h"
@@ -231,7 +225,7 @@ static int send_whack_msg(struct whack_message *msg, char *ctlsocket)
 	len = wp.str_next - (unsigned char *)msg;
 
 	/* Connect to pluto ctl */
-	sock = safe_socket(AF_UNIX, SOCK_STREAM, 0);
+	sock = cloexec_socket(AF_UNIX, SOCK_STREAM, 0);
 	if (sock < 0) {
 		starter_log(LOG_LEVEL_ERR, "socket() failed: %s",
 			strerror(errno));
@@ -368,7 +362,7 @@ static bool set_whack_end(struct whack_end *w,
 	if (l->ckaid != NULL) {
 		w->ckaid = l->ckaid;
 	}
-	if (l->rsasigkey_type == PUBKEY_PREEXCHANGED) {
+	if (l->pubkey_type == PUBKEY_PREEXCHANGED) {
 		/*
 		 * Only send over raw (prexchanged) rsapubkeys (i.e.,
 		 * not %cert et.a.)
@@ -378,8 +372,10 @@ static bool set_whack_end(struct whack_end *w,
 		 * the same ID.  Just assume that the first key should
 		 * be used for the CKAID.
 		 */
-		passert(l->rsasigkey != NULL);
-		w->rsasigkey = l->rsasigkey;
+		passert(l->pubkey != NULL);
+		passert(l->pubkey_alg != 0);
+		w->pubkey_alg = l->pubkey_alg;
+		w->pubkey = l->pubkey;
 	}
 	w->ca = l->ca;
 	if (l->options_set[KNCF_SENDCERT])
@@ -421,19 +417,17 @@ static int starter_whack_add_pubkey(struct starter_config *cfg,
 				    const struct starter_conn *conn,
 				    const struct starter_end *end)
 {
-	const char *err;
-	char err_buf[TTODATAV_BUF];
-	char keyspace[1024 + 4];
 	int ret = 0;
 	const char *lr = end->leftright;
 
 	struct whack_message msg = empty_whack_message;
 	msg.whack_key = true;
-	msg.pubkey_alg = PUBKEY_ALG_RSA;
-	if (end->id && end->rsasigkey) {
+	msg.pubkey_alg = end->pubkey_alg;
+
+	if (end->id && end->pubkey != NULL) {
 		msg.keyid = end->id;
 
-		switch (end->rsasigkey_type) {
+		switch (end->pubkey_type) {
 		case PUBKEY_DNSONDEMAND:
 			starter_log(LOG_LEVEL_DEBUG,
 				"conn %s/%s has key from DNS",
@@ -450,22 +444,41 @@ static int starter_whack_add_pubkey(struct starter_config *cfg,
 			break;
 
 		case PUBKEY_PREEXCHANGED:
-			err = ttodatav(end->rsasigkey, 0, 0, keyspace,
-				sizeof(keyspace),
-				&msg.keyval.len,
-				err_buf, sizeof(err_buf), 0);
-			if (err) {
-				starter_log(LOG_LEVEL_ERR,
-					"conn %s/%s: rsasigkey malformed [%s]",
-					connection_name(conn), lr, err);
-				return 1;
-			} else {
-				starter_log(LOG_LEVEL_DEBUG,
-					    "\tsending %s %srsasigkey=%s",
-					    connection_name(conn), lr, end->rsasigkey);
-				msg.keyval.ptr = (unsigned char *)keyspace;
-				ret = send_whack_msg(&msg, cfg->ctlsocket);
+		{
+			int base;
+			switch (end->pubkey_alg) {
+			case IPSECKEY_ALGORITHM_RSA:
+			case IPSECKEY_ALGORITHM_ECDSA:
+				base = 0; /* figure it out */
+				break;
+			case IPSECKEY_ALGORITHM_X_PUBKEY:
+				base = 64; /* dam it */
+				break;
+			default:
+				bad_case(end->pubkey_alg);
 			}
+			chunk_t keyspace = NULL_HUNK; /* must free */
+			err_t err = ttochunk(shunk1(end->pubkey), base, &keyspace);
+			if (err != NULL) {
+				enum_buf pkb;
+				starter_log(LOG_LEVEL_ERR,
+					    "conn %s: %s%s malformed [%s]",
+					    connection_name(conn), lr,
+					    str_enum(&ipseckey_algorithm_config_names, end->pubkey_alg, &pkb),
+					    err);
+				return 1;
+			}
+
+			enum_buf pkb;
+			starter_log(LOG_LEVEL_DEBUG,
+				    "\tsending %s %s%s=%s",
+				    connection_name(conn), lr,
+				    str_enum(&ipseckey_algorithm_config_names, end->pubkey_alg, &pkb),
+				    end->pubkey);
+			msg.keyval = keyspace;
+			ret = send_whack_msg(&msg, cfg->ctlsocket);
+			free_chunk_content(&keyspace);
+		}
 		}
 	}
 
@@ -496,9 +509,11 @@ static int starter_whack_basic_add_conn(struct starter_config *cfg,
 		msg.dnshostname = conn->right.strings[KSCF_IP];
 
 	msg.nic_offload = conn->options[KNCF_NIC_OFFLOAD];
-	msg.sa_ike_life_seconds = deltatime_ms(conn->options[KNCF_IKELIFETIME_MS]);
-	msg.sa_ipsec_life_seconds = deltatime_ms(conn->options[KNCF_SALIFETIME_MS]);
+	msg.sa_ike_life_seconds = deltatime_ms(conn->options[KNCF_IKE_LIFETIME_MS]);
+	msg.sa_ipsec_life_seconds = deltatime_ms(conn->options[KNCF_IPSEC_LIFETIME_MS]);
 	msg.sa_rekey_margin = deltatime_ms(conn->options[KNCF_REKEYMARGIN_MS]);
+	msg.sa_ipsec_max_bytes = conn->options[KNCF_IPSEC_MAXBYTES];
+	msg.sa_ipsec_max_packets = conn->options[KNCF_IPSEC_MAXPACKETS];
 	msg.sa_rekey_fuzz = conn->options[KNCF_REKEYFUZZ];
 	msg.sa_keying_tries = conn->options[KNCF_KEYINGTRIES];
 	msg.sa_replay_window = conn->options[KNCF_REPLAY_WINDOW];
@@ -700,12 +715,12 @@ static int starter_whack_basic_add_conn(struct starter_config *cfg,
 	if (r != 0)
 		return r;
 
-	if (conn->left.rsasigkey != NULL) {
+	if (conn->left.pubkey != NULL) {
 		r = starter_whack_add_pubkey(cfg, conn, &conn->left);
 		if (r != 0)
 			return r;
 	}
-	if (conn->right.rsasigkey != NULL) {
+	if (conn->right.pubkey != NULL) {
 		r = starter_whack_add_pubkey(cfg, conn, &conn->right);
 		if (r != 0)
 			return r;

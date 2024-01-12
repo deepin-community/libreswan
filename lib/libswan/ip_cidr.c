@@ -44,12 +44,18 @@ const struct ip_info *cidr_type(const ip_cidr *cidr)
 		return NULL;
 	}
 
-	if (!cidr->is_set) {
+	/* may return NULL */
+	return cidr_info(*cidr);
+}
+
+const struct ip_info *cidr_info(const ip_cidr cidr)
+{
+	if (!cidr.is_set) {
 		return NULL;
 	}
 
 	/* may return NULL */
-	return ip_version_info(cidr->version);
+	return ip_version_info(cidr.version);
 }
 
 ip_address cidr_address(const ip_cidr cidr)
@@ -75,11 +81,11 @@ err_t cidr_specified(const ip_cidr cidr)
 
 	/* https://en.wikipedia.org/wiki/IPv6_address#Special_addresses */
 	/* ::/0 and/or 0.0.0.0/0 */
-	if (cidr.prefix_bits == 0 && thingeq(cidr.bytes, unset_bytes)) {
+	if (cidr.prefix_bits == 0 && thingeq(cidr.bytes, unset_ip_bytes)) {
 		return "default route (no specific route)";
 	}
 
-	if (thingeq(cidr.bytes, unset_bytes)) {
+	if (thingeq(cidr.bytes, unset_ip_bytes)) {
 		return "unspecified address";
 	}
 
@@ -121,7 +127,7 @@ err_t numeric_to_cidr(shunk_t src, const struct ip_info *afi, ip_cidr *cidr)
 	/* parse MASK */
 	uintmax_t maskbits = afi->mask_cnt;/*anything*/
 	/* don't use bound - error is confusing */
-	err = shunk_to_uintmax(mask, NULL, 0, &maskbits, 0);
+	err = shunk_to_uintmax(mask, NULL, 0, &maskbits);
 	if (err != NULL) {
 		/* not a number */
 		return err;

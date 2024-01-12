@@ -101,6 +101,7 @@ kvmplutotest	addconn-07-defaultroute			good
 kvmplutotest	addconn-08-ordering			good	github:658
 kvmplutotest	addconn-09-dpd-vs-liveness		good
 kvmplutotest	addconn-10-duplicate-key		good
+kvmplutotest	addconn-11-bignum			good
 kvmplutotest	algparse-01				good
 kvmplutotest	algparse-02-fips			good
 kvmplutotest	libipsecconf-01				good
@@ -112,6 +113,7 @@ kvmplutotest	libipsecconf-07				good
 kvmplutotest	libipsecconf-08-system-crypto-policies	good
 kvmplutotest	libipsecconf-09-time-prefix		wip
 kvmplutotest	libipsecconf-10-percentage-prefix	wip
+kvmplutotest	libipsecconf-11-default-key		wip	github:833
 
 
 #################################################################
@@ -124,7 +126,6 @@ kvmplutotest	whack-02-globalstatus			good
 # IKEv2 tests
 #################################################################
 kvmplutotest	ikev2-03-basic-rawrsa			good
-kvmplutotest	ikev2-03-basic-rawrsa-ckaid		good
 kvmplutotest	ikev2-03-basic-rawrsa-rsasigkey		good
 kvmplutotest	ikev2-03-basic-rawrsa-pem		good
 kvmplutotest	ikev2-04-basic-x509			good
@@ -208,6 +209,8 @@ kvmplutotest	ikev2-ikeport-03-responder		good
 kvmplutotest	ikev2-ikeport-04-rw-nat-initiator	good
 kvmplutotest	ikev2-ikeport-05-rw-nat-responder	good
 kvmplutotest	ikev2-ikeport-06-host-to-host		good
+kvmplutotest	ikev2-ikeport-4500-initiator-ipv4	good
+kvmplutotest	ikev2-ikeport-4500-initiator-ipv6	good
 
 kvmplutotest	ikev2-24-cryptoload			wip
 kvmplutotest	ikev2-25-rw-nat				good
@@ -266,10 +269,6 @@ kvmplutotest	ikev2-algo-sha2-06			good
 kvmplutotest	ikev2-algo-sha2-08-truncbug		good
 
 kvmplutotest	ikev2-nat-pluto-03			good
-
-# dh tests
-kvmplutotest	ikev1-algo-ike-dh-ecp-01		good
-kvmplutotest	ikev2-algo-ike-dh-ecp-01		good
 
 kvmplutotest	ikev2-child-re-up-01			wip
 
@@ -724,6 +723,10 @@ kvmplutotest	ikev2-child-rekey-09-windows	wip	github:576
 kvmplutotest	ikev2-child-rekey-10-impair-rekey-initiate-subnet	good
 kvmplutotest	ikev2-child-rekey-10-impair-rekey-respond-supernet	good
 kvmplutotest	ikev2-child-rekey-10-impair-rekey-respond-subnet	good
+kvmplutotest	ikev2-expire-01-bytes		good
+kvmplutotest	ikev2-expire-02-packets		good
+kvmplutotest	ikev2-expire-03-bytes-ignore-soft			good
+kvmplutotest	ikev2-expire-04-ipcomp		good
 kvmplutotest	ikev2-child-dual-asym-01	good
 kvmplutotest	ikev2-ike-rekey-01		good
 kvmplutotest	ikev2-ike-rekey-02		good
@@ -789,6 +792,18 @@ kvmplutotest	nat-dpd-pluto-01	wip
 #
 kvmplutotest	ikev1-algo-ike-aes-01	good
 kvmplutotest	ikev1-algo-ike-aes-02	good
+
+# ECP DH tests
+kvmplutotest	algo-ikev1-aes128-sha1-ecp256		good
+kvmplutotest	algo-ikev2-aes128-sha1-ecp256		good
+kvmplutotest	algo-ikev1-aes128-sha1-ecp384		good
+kvmplutotest	algo-ikev2-aes128-sha1-ecp384		good
+kvmplutotest	algo-ikev1-aes128-sha1-ecp521		good
+kvmplutotest	algo-ikev2-aes128-sha1-ecp521		good
+
+# MD5 as PRF (regression in 4.8)
+kvmplutotest	algo-ikev1-aes-md5-esp-3des-sha1	good
+kvmplutotest	algo-ikev2-aes-md5-esp-3des-sha1	good
 
 # CAP_DAC_OVERRIDE
 kvmplutotest	basic-pluto-06		good
@@ -1223,14 +1238,20 @@ kvmplutotest	ikev2-leak-01-db_v2_prop_conj	good
 kvmplutotest	ikev2-leak-02-no-psk		good
 
 # seccomp
-kvmplutotest	seccomp-01-enabled		good
-kvmplutotest	seccomp-02-tolerant		good
+kvmplutotest	seccomp-01-enabled		good	github/795
+kvmplutotest	seccomp-02-tolerant		good	github/795
 kvmplutotest	seccomp-03-updown		wip
 
 # Utility tests like "ipsec showhostkey"
-kvmplutotest	ipsec-hostkey-ckaid-01		good
-kvmplutotest	ipsec-hostkey-ckaid-02-fips	good
-kvmplutotest	ipsec-hostkey-ckaid-03-nsspw	good
+kvmplutotest	ipsec-hostkey-01-ckaid-rsa		good
+kvmplutotest	ipsec-hostkey-01-ckaid-ecdsa		good
+kvmplutotest	ipsec-hostkey-02-ckaid-fips		good
+kvmplutotest	ipsec-hostkey-03-ckaid-nsspw		good
+kvmplutotest	ipsec-hostkey-04-ikev1-rawkey-rsa	good
+kvmplutotest	ipsec-hostkey-05-ikev2-rawkey-rsa	good
+kvmplutotest	ipsec-hostkey-05-ikev2-rawkey-ecdsa	good
+kvmplutotest	ipsec-hostkey-06-ikev2-pubkey-rsa	good
+kvmplutotest	ipsec-hostkey-06-ikev2-pubkey-ecdsa	good
 
 # PPK
 kvmplutotest	ikev2-ppk-dynamic-01				wip
@@ -1277,12 +1298,13 @@ kvmplutotest	ikev2-tcp-04-ikeport					good
 kvmplutotest	ikev2-tcp-06-fail-ike-sa-init-cookie			good
 kvmplutotest	ikev2-tcp-06-fail-ike-sa-init-invalid-ke		good
 kvmplutotest	ikev2-tcp-06-fail-ike-sa-init-redirect			good
-kvmplutotest	ikev2-tcp-07-fail-ike-auth-authentication-failed	good
+kvmplutotest	ikev2-tcp-07-fail-ike-auth-authentication		good
 kvmplutotest	ikev2-tcp-07-fail-ike-auth-redirect			good
 kvmplutotest	ikev2-tcp-10-rekey-child				good
 kvmplutotest	ikev2-tcp-10-rekey-ike					good
 kvmplutotest	ikev2-tcp-25-rw-nat					good
 kvmplutotest	ikev2-tcp-26-rw-nat-keepalive				good
+kvmplutotest	ikev2-tcp-27-6in6					good	github/730
 
 kvmplutotest	ikev2-tcp-05-transport-mode				good
 kvmplutotest	ikev2-udp-05-transport-mode 				good
@@ -1308,9 +1330,6 @@ kvmplutotest	ikev2-crossing-streams-01		wip	github:557
 kvmplutotest	ikev2-crossing-streams-02		good
 kvmplutotest	ikev2-crossing-streams-03-iface		wip	github:557
 
-# uses bsdkame; reference test
-kvmplutotest	bsdkame-initiator-tunnel-esp-ikev2		netbsd
-
 # uses the kernel-pfkeyv2.c code
 
 kvmplutotest	pfkeyv2-transport-ipv4-ah-ipcomp-ikev2	netbsd
@@ -1328,26 +1347,31 @@ kvmplutotest	pfkeyv2-tunnel-4in4-ah-ikev2		netbsd
 kvmplutotest	pfkeyv2-tunnel-4in4-esp-ipcomp-ikev2	netbsd
 kvmplutotest	pfkeyv2-tunnel-4in4-esp-ikev2		netbsd
 
-kvmplutotest	pfkeyv2-tunnel-4in6-ah-ipcomp-ikev2	skiptest	github/713
+kvmplutotest	pfkeyv2-tunnel-4in6-ah-ipcomp-ikev2	netbsd	github/713
 kvmplutotest	pfkeyv2-tunnel-4in6-ah-ikev2		netbsd
-kvmplutotest	pfkeyv2-tunnel-4in6-esp-ipcomp-ikev2	skiptest	github/713
+kvmplutotest	pfkeyv2-tunnel-4in6-esp-ipcomp-ikev2	netbsd	github/713
 kvmplutotest	pfkeyv2-tunnel-4in6-esp-ikev2		netbsd
 
-kvmplutotest	pfkeyv2-tunnel-6in4-ah-ipcomp-ikev2	skiptest	github/713
+kvmplutotest	pfkeyv2-tunnel-6in4-ah-ipcomp-ikev2	netbsd	github/713
 kvmplutotest	pfkeyv2-tunnel-6in4-ah-ikev2		netbsd
-kvmplutotest	pfkeyv2-tunnel-6in4-esp-ipcomp-ikev2	skiptest	github/713
+kvmplutotest	pfkeyv2-tunnel-6in4-esp-ipcomp-ikev2	netbsd	github/713
 kvmplutotest	pfkeyv2-tunnel-6in4-esp-ikev2		netbsd
 
-kvmplutotest	pfkeyv2-tunnel-6in6-ah-ipcomp-ikev2	skiptest	github/713
+kvmplutotest	pfkeyv2-tunnel-6in6-ah-ipcomp-ikev2	netbsd	github/713
 kvmplutotest	pfkeyv2-tunnel-6in6-ah-ikev2		netbsd
-kvmplutotest	pfkeyv2-tunnel-6in6-esp-ipcomp-ikev2	skiptest	github/713
+kvmplutotest	pfkeyv2-tunnel-6in6-esp-ipcomp-ikev2	netbsd	github/713
 kvmplutotest	pfkeyv2-tunnel-6in6-esp-ikev2		netbsd
+
+kvmplutotest	pfkeyv2-esn-esp-freebsd			freebsd
+kvmplutotest	pfkeyv2-esn-ah-freebsd			freebsd
+kvmplutotest	pfkeyv2-replay-window-freebsd		freebsd
 
 kvmplutotest	pfkeyv2-ondemand			skiptest #netbsd-wip
 
 # OpenBSD interop
-kvmplutotest	interop-ikev2-openbsd-01-iked-responder	openbsd
-kvmplutotest	interop-ikev2-openbsd-02-iked-initiator	openbsd
+kvmplutotest	interop-ikev2-openbsd-01-iked-responder		openbsd
+kvmplutotest	interop-ikev2-openbsd-02-iked-initiator		openbsd
+kvmplutotest	interop-ikev2-openbsd-03-pluto-initiator	openbsd
 
 # real world interop configurations
 kvmplutotest	 elvis-is-alive				skiptest # ELVIS-PLUS IPsec test server

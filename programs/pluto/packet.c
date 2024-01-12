@@ -2503,11 +2503,11 @@ static void update_next_payload_chain(pb_stream *outs,
  * This routine returns TRUE iff it succeeds.
  */
 
-static diag_t pbs_out_number(struct pbs_out *outs, struct_desc *sd,
-			     const uint8_t **inp,
-			     uint8_t **cur,
-			     field_desc *fp,
-			     bool *immediate)
+static bool pbs_out_number(struct pbs_out *outs, struct_desc *sd,
+			   const uint8_t **inp,
+			   uint8_t **cur,
+			   field_desc *fp,
+			   bool *immediate)
 {
 
 	uint32_t n;
@@ -2530,8 +2530,7 @@ static diag_t pbs_out_number(struct pbs_out *outs, struct_desc *sd,
 
 	case ft_af_loose_enum: /* Attribute Format + value from an enumeration */
 	case ft_af_enum: /* Attribute Format + value from an enumeration */
-		*immediate = ((n & ISAKMP_ATTR_AF_MASK) ==
-			      ISAKMP_ATTR_AF_TV);
+		*immediate = ((n & ISAKMP_ATTR_AF_MASK) == ISAKMP_ATTR_AF_TV);
 		if (fp->field_type == ft_af_enum &&
 		    enum_name(fp->desc, n) == NULL) {
 #define MSG "%s of %s has an unknown value: 0x%x+%" PRIu32 " (0x%" PRIx32 ")", \
@@ -2541,7 +2540,8 @@ static diag_t pbs_out_number(struct pbs_out *outs, struct_desc *sd,
 				n & ~ISAKMP_ATTR_AF_MASK,		\
 				n
 			if (!impair.emitting) {
-				return diag(MSG);
+				llog_pexpect(outs->outs_logger, HERE, MSG);
+				return false;
 			}
 			llog(RC_LOG, outs->outs_logger, "IMPAIR: emitting "MSG);
 		}
@@ -2549,9 +2549,16 @@ static diag_t pbs_out_number(struct pbs_out *outs, struct_desc *sd,
 
 	case ft_enum:   /* value from an enumeration */
 		if (enum_name(fp->desc, n) == NULL) {
-			return diag("%s of %s has an unknown value: %" PRIu32 " (0x%" PRIx32 ")",
-				    fp->name, sd->name,
-				    n, n);
+			if (!impair.emitting) {
+				llog_pexpect(outs->outs_logger, HERE,
+					     "%s of %s has an unknown value: %" PRIu32 " (0x%" PRIx32 ")",
+					     fp->name, sd->name,
+					     n, n);
+				return false;
+			}
+			llog(RC_LOG, outs->outs_logger,
+			     "IMPAIR: %s of %s has an unknown value: %" PRIu32 " (0x%" PRIx32 ")",
+			     fp->name, sd->name, n, n);
 		}
 		break;
 
@@ -2564,10 +2571,12 @@ static diag_t pbs_out_number(struct pbs_out *outs, struct_desc *sd,
 	case ft_lset:           /* bits representing set */
 		if (!test_lset(fp->desc, n)) {
 			lset_buf lb;
-			return diag("bitset %s of %s has unknown member(s): %s (0x%" PRIx32 ")",
-				    fp->name, sd->name,
-				    str_lset(fp->desc, n, &lb),
-				    n);
+			llog_pexpect(outs->outs_logger, HERE,
+				     "bitset %s of %s has unknown member(s): %s (0x%" PRIx32 ")",
+				     fp->name, sd->name,
+				     str_lset(fp->desc, n, &lb),
+				     n);
+			return false;
 		}
 		break;
 
@@ -2582,12 +2591,12 @@ static diag_t pbs_out_number(struct pbs_out *outs, struct_desc *sd,
 	}
 	(*inp) += fp->size;
 	(*cur) += fp->size;
-	return NULL;
+	return true;
 }
 
-diag_t pbs_out_struct(struct pbs_out *outs, struct_desc *sd,
-		      const void *struct_ptr, size_t struct_size,
-		      struct pbs_out *obj_pbs)
+bool pbs_out_struct(struct pbs_out *outs, struct_desc *sd,
+		    const void *struct_ptr, size_t struct_size,
+		    struct pbs_out *obj_pbs)
 {
 	const u_int8_t *inp = struct_ptr;
 	u_int8_t *cur = outs->cur;
@@ -2599,7 +2608,9 @@ diag_t pbs_out_struct(struct pbs_out *outs, struct_desc *sd,
 	}
 
 	if (outs->roof - cur < (ptrdiff_t)sd->size) {
-		return diag("not enough room left in output packet to place %s", sd->name);
+		llog_pexpect(outs->outs_logger, HERE,
+			     "not enough room left in output packet to place %s", sd->name);
+		return false;
 	}
 
 
@@ -2698,9 +2709,9 @@ diag_t pbs_out_struct(struct pbs_out *outs, struct_desc *sd,
 			}
 
 			/* immediate form is just like a number */
-			diag_t d = pbs_out_number(outs, sd, &inp, &cur, fp, &immediate);
-			if (d != NULL) {
-				return d;
+			if (!pbs_out_number(outs, sd, &inp, &cur, fp, &immediate)) {
+				/* already logged */
+				return false;
 			}
 			break;
 
@@ -2711,13 +2722,11 @@ diag_t pbs_out_struct(struct pbs_out *outs, struct_desc *sd,
 		case ft_af_enum:        /* Attribute Format + value from an enumeration */
 		case ft_af_loose_enum:  /* Attribute Format + value from an enumeration */
 		case ft_lset:           /* bits representing set */
-		{
-			diag_t d = pbs_out_number(outs, sd, &inp, &cur, fp, &immediate);
-			if (d != NULL) {
-				return d;
+			if (!pbs_out_number(outs, sd, &inp, &cur, fp, &immediate)) {
+				/* already logged */
+				return false;
 			}
 			break;
-		}
 
 		case ft_raw: /* bytes to be left in network-order */
 			for (; i != 0; i--)
@@ -2743,7 +2752,7 @@ diag_t pbs_out_struct(struct pbs_out *outs, struct_desc *sd,
 
 				*obj_pbs = obj;
 			}
-			return NULL;
+			return true;
 
 		default:
 			bad_case(fp->field_type);
@@ -2756,13 +2765,7 @@ diag_t pbs_out_struct(struct pbs_out *outs, struct_desc *sd,
 bool out_struct(const void *struct_ptr, struct_desc *sd,
 		struct pbs_out *outs, struct pbs_out *obj_pbs)
 {
-	diag_t d = pbs_out_struct(outs, sd, struct_ptr, 0, obj_pbs);
-	if (d != NULL) {
-		llog_diag(RC_LOG_SERIOUS, outs->outs_logger, &d, "%s", "");
-		return false;
-	}
-
-	return true;
+	return pbs_out_struct(outs, sd, struct_ptr, 0, obj_pbs);
 }
 
 bool ikev1_out_generic(struct_desc *sd,
@@ -2785,9 +2788,8 @@ bool ikev1_out_generic_raw(struct_desc *sd,
 	if (!ikev1_out_generic(sd, outs, &pbs)) {
 		return false;
 	}
-	diag_t d = pbs_out_raw(&pbs, bytes, len, name);
-	if (d != NULL) {
-		llog_diag(RC_LOG_SERIOUS, outs->outs_logger, &d, "%s", "");
+	if (!pbs_out_raw(&pbs, bytes, len, name)) {
+		/* already logged */
 		return false;
 	}
 
@@ -2795,62 +2797,51 @@ bool ikev1_out_generic_raw(struct_desc *sd,
 	return true;
 }
 
-static diag_t space_for(size_t len, pb_stream *outs, const char *fmt, ...) PRINTF_LIKE(3) MUST_USE_RESULT;
-static diag_t space_for(size_t len, pb_stream *outs, const char *fmt, ...)
+static bool space_for(struct pbs_out *outs, size_t len, const char *what, const char *name, where_t where)
 {
-	/* nothing to do, or at least one byte spare */
-	if (len == 0 || pbs_left(outs) > len) {
-		LSWDBGP(DBG_BASE, buf) {
-			jam_string(buf, "emitting ");
-			va_list ap;
-			va_start(ap, fmt);
-			jam_va_list(buf, fmt, ap);
-			va_end(ap);
-			jam(buf, " into %s", outs->name);
-		}
-		return NULL;
+	/*
+	 * Is there more than enough space for LEN?  The +1 is to
+	 * ensure that there is always one byte of space spare.
+	 */
+	if (pbs_left(outs) >= len + 1) {
+		/* logged by caller */
+		return true;
 	}
 
-	if (pbs_left(outs) == 0) {
-		/* should this be a DBGLOG? */
-		diag_t d;
-		JAMBUF(buf) {
-			jam(buf, "%s is already full; discarding ", outs->name);
-			va_list ap;
-			va_start(ap, fmt);
-			jam_va_list(buf, fmt, ap);
-			va_end(ap);
-			d = diag(PRI_SHUNK, pri_shunk(jambuf_as_shunk(buf)));
-		}
-		return d;
+	if (pbs_left(outs) > 0) {
+		/*
+		 * Overflowing.
+		 */
+		pexpect(pbs_left(outs) <= len);
+		llog_pexpect(outs->outs_logger, where,
+			     "buffer is full; unable to emit %zu %s bytes of %s into %s",
+			     len, what, name, outs->name);
+		/* overflow the buffer */
+		outs->cur += pbs_left(outs);
+		return false;
 	}
 
-	/* never exactly fill - reserve space for a trailing byte */
-	pexpect(pbs_left(outs) <= len);
-	diag_t d;
-	JAMBUF(buf) {
-		jam(buf, "%s is full; unable to emit ", outs->name);
-		va_list ap;
-		va_start(ap, fmt);
-		jam_va_list(buf, fmt, ap);
-		va_end(ap);
-			d = diag(PRI_SHUNK, pri_shunk(jambuf_as_shunk(buf)));
-	}
-	/* overflow the buffer */
-	outs->cur += pbs_left(outs);
-	return d;
+	/*
+	 * Already overflowing.
+	 */
+	pexpect(pbs_left(outs) == 0);
+	llog_pexpect(outs->outs_logger, where,
+		     "buffer is overflowing; unable to emit %zu %s bytes of %s into %s",
+		     len, what, name, outs->name);
+	return false;
+
 }
 
-diag_t pbs_out_raw(struct pbs_out *outs, const void *bytes, size_t len, const char *name)
+bool pbs_out_raw(struct pbs_out *outs, const void *bytes, size_t len, const char *name)
 {
-	diag_t d = space_for(len, outs, "%zu raw bytes of %s", len, name);
-	if (d != NULL) {
-		return d;
+	if (!space_for(outs, len, "raw", name, HERE)) {
+		/* already logged */
+		return false;
 	}
 
 	if (DBGP(DBG_BASE)) {
+		DBG_log("emitting %zu raw bytes of %s into %s", len, name, outs->name);
 		if (len > 16) { /* arbitrary */
-			DBG_log("%s:", name);
 			DBG_dump(NULL, bytes, len);
 		} else {
 			LSWLOG_DEBUG(buf) {
@@ -2859,33 +2850,36 @@ diag_t pbs_out_raw(struct pbs_out *outs, const void *bytes, size_t len, const ch
 			}
 		}
 	}
+
 	memcpy(outs->cur, bytes, len);
 	outs->cur += len;
-	return NULL;
+	return true;
 }
 
-diag_t pbs_out_repeated_byte(struct pbs_out *outs, uint8_t byte, size_t len, const char *name)
+bool pbs_out_repeated_byte(struct pbs_out *outs, uint8_t byte, size_t len, const char *name)
 {
-	diag_t d = space_for(len, outs, "%zu 0x%02x repeated bytes of %s", len, byte, name);
-	if (d != NULL) {
-		return d;
+	if (!space_for(outs, len, "repeated", name, HERE)) {
+		/* already logged */
+		return false;
 	}
 
+	dbg("emitting %"PRIu8" as %zu bytes of %s into %s", byte, len, name, outs->name);
 	memset(outs->cur, byte, len);
 	outs->cur += len;
-	return NULL;
+	return true;
 }
 
-diag_t pbs_out_zero(struct pbs_out *outs, size_t len, const char *name)
+bool pbs_out_zero(struct pbs_out *outs, size_t len, const char *name)
 {
-	diag_t d = space_for(len, outs, "%zu zero bytes of %s", len, name);
-	if (d != NULL) {
-		return d;
+	if (!space_for(outs, len, "zero", name, HERE)) {
+		/* already logged */
+		return false;
 	}
 
+	dbg("emitting %zu zero bytes of %s into %s", len, name, outs->name);
 	memset(outs->cur, 0, len);
 	outs->cur += len;
-	return NULL;
+	return true;
 }
 
 /*
@@ -2982,8 +2976,12 @@ diag_t pbs_in_address(struct pbs_in *input_pbs,
 	}
 }
 
-diag_t pbs_out_address(struct pbs_out *out_pbs, const ip_address address, const char *what)
+bool pbs_out_address(struct pbs_out *out_pbs, const ip_address address, const char *what)
 {
 	shunk_t as = address_as_shunk(&address);
-	return pbs_out_hunk(out_pbs, as, what);
+	if (!pbs_out_hunk(out_pbs, as, what)) {
+		/* already logged */
+		return false;
+	}
+	return true;
 }

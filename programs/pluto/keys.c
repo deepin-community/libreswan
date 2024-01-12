@@ -66,6 +66,7 @@
 #include "secrets.h"
 #include "ike_alg_hash.h"
 #include "pluto_timing.h"
+#include "show.h"
 
 static struct secret *pluto_secrets = NULL;
 
@@ -81,23 +82,23 @@ void free_preshared_secrets(struct logger *logger)
 }
 
 static int print_secrets(struct secret *secret,
-			 struct private_key_stuff *pks UNUSED,
+			 struct secret_stuff *pks UNUSED,
 			 void *uservoid)
 {
 	struct show *s = uservoid;
 
 	const char *kind;
 	switch (pks->kind) {
-	case PKK_PSK:
+	case SECRET_PSK:
 		kind = "PSK";
 		break;
-	case PKK_RSA:
+	case SECRET_RSA:
 		kind = "RSA";
 		break;
-	case PKK_XAUTH:
+	case SECRET_XAUTH:
 		kind = "XAUTH";
 		break;
-	case PKK_ECDSA:
+	case SECRET_ECDSA:
 		kind = "ECDSA";
 		break;
 	default:
@@ -143,7 +144,7 @@ void list_psks(struct show *s)
 	show_comment(s, "List of Pre-shared secrets (from %s)",
 		     oco->secretsfile);
 	show_blank(s);
-	lsw_foreach_secret(pluto_secrets, print_secrets, s);
+	foreach_secret(pluto_secrets, print_secrets, s);
 }
 
 /*
@@ -209,10 +210,10 @@ static bool try_all_keys(const char *cert_origin,
 	for (struct pubkey_list *p = pubkey_db; p != NULL; p = p->next) {
 		struct pubkey *key = p->key;
 
-		if (key->type != s->signer->type) {
+		if (key->content.type != s->signer->type) {
 			id_buf printkid;
 			dbg("  skipping '%s' with type %s",
-			    str_id(&key->id, &printkid), key->type->name);
+			    str_id(&key->id, &printkid), key->content.type->name);
 			continue;
 		}
 
@@ -295,7 +296,8 @@ diag_t authsig_and_log_using_pubkey(struct ike_sa *ike,
 				    const struct crypt_mac *hash,
 				    shunk_t signature,
 				    const struct hash_desc *hash_algo,
-				    const struct pubkey_signer *signer)
+				    const struct pubkey_signer *signer,
+				    const char *signature_payload_name)
 {
 	const struct connection *c = ike->sa.st_connection;
 	struct tac_state s = {
@@ -335,7 +337,7 @@ diag_t authsig_and_log_using_pubkey(struct ike_sa *ike,
 			id_buf printkid;
 			log_state(RC_LOG_SERIOUS, &ike->sa,
 				  "cached %s public key '%s' has expired and has been deleted",
-				  key->type->name, str_id(&key->id, &printkid));
+				  key->content.type->name, str_id(&key->id, &printkid));
 			*pp = free_public_keyentry(*(pp));
 			continue; /* continue with next public key */
 		}
@@ -373,26 +375,41 @@ diag_t authsig_and_log_using_pubkey(struct ike_sa *ike,
 	pexpect(s.tried_cnt > 0);
 	LLOG_JAMBUF(RC_LOG_SERIOUS, ike->sa.st_logger, buf) {
 		if (ike->sa.st_ike_version == IKEv2) {
+			/*
+			 * IKEv2 only; IKEv1 logs established as a
+			 * separate line.
+			 */
 			jam(buf, "%s established IKE SA; ",
 			    (ike->sa.st_sa_role == SA_INITIATOR ? "initiator" :
 			     ike->sa.st_sa_role == SA_RESPONDER ? "responder" :
 			     "?"));
 		}
-		jam(buf, "authenticated using %s with %s and %s certificate ",
-		    signer->name, hash_algo->common.fqn,
-		    s.cert_origin);
-		jam(buf, "'");
+		/* all methods log this string */
+		jam_string(buf, "authenticated peer ");
+		/* what is the AUTH method ... */
+		jam_string(buf, "'");
+		signer->jam_auth_method(buf, signer, s.key, hash_algo);
+		jam_string(buf, "'");
+		if (signature_payload_name != NULL) {
+			jam(buf, " %s", signature_payload_name);
+		} else {
+			jam(buf, " signature");
+		}
+		/* ... and what was used to authenticate it */
+		jam(buf, " using %s certificate ", s.cert_origin);
+		jam_string(buf, "'");
 		jam_id_bytes(buf, &s.key->id, jam_sanitized_bytes);
-		jam(buf, "'");
+		jam_string(buf, "'");
 		/* this is so that the cert verified line can be deleted */
 		if (s.key->issuer.ptr != NULL) {
-			jam(buf, " issued by CA '");
+			jam_string(buf, " issued by CA ");
+			jam_string(buf, "'");
 			jam_dn(buf, s.key->issuer, jam_sanitized_bytes);
-			jam(buf, "'");
+			jam_string(buf, "'");
 		}
 	}
-	pubkey_delref(&ike->sa.st_peer_pubkey, HERE);
-	ike->sa.st_peer_pubkey = pubkey_addref(s.key, HERE);
+	pubkey_delref(&ike->sa.st_peer_pubkey);
+	ike->sa.st_peer_pubkey = pubkey_addref(s.key);
 	return NULL;
 }
 
@@ -403,12 +420,12 @@ diag_t authsig_and_log_using_pubkey(struct ike_sa *ike,
  */
 
 static struct secret *lsw_get_secret(const struct connection *c,
-				     enum private_key_kind kind,
+				     enum secret_kind kind,
 				     bool asym)
 {
 	/* under certain conditions, override that_id to %ANYADDR */
 
-	struct id rw_id; /* must be at same scope as that_id */
+	struct id rw_id; /* MUST BE AT SAME SCOPE AS THAT_ID */
 	const struct id *const this_id = &c->local->host.id;
 	const struct id *that_id = &c->remote->host.id; /* can change */
 
@@ -420,7 +437,7 @@ static struct secret *lsw_get_secret(const struct connection *c,
 
 	    /* case 2 */
 	    ( c->remote->config->host.authby.psk &&
-	      kind == PKK_PSK /*shared-secret*/ &&
+	      kind == SECRET_PSK /*shared-secret*/ &&
 	      ( ( c->kind == CK_TEMPLATE &&
 		  c->remote->host.id.kind == ID_NONE ) ||
 		( c->kind == CK_INSTANCE &&
@@ -434,8 +451,10 @@ static struct secret *lsw_get_secret(const struct connection *c,
 		 */
 		pexpect(address_is_specified(c->local->host.addr));
 		/* roadwarrior: replace that with %ANYADDR */
-		rw_id.kind = address_type(&c->local->host.addr)->id_ip_addr;
-		rw_id.ip_addr = address_type(&c->local->host.addr)->address.unspec;
+		rw_id = (struct id) {
+			.kind = address_type(&c->local->host.addr)->id_ip_addr,
+			.ip_addr = address_type(&c->local->host.addr)->address.unspec,
+		};
 		id_buf old_buf, new_buf;
 		dbg("%s() switching remote roadwarrier ID from %s to %s (%%ANYADDR)",
 		    __func__, str_id(that_id, &old_buf), str_id(&rw_id, &new_buf));
@@ -447,7 +466,7 @@ static struct secret *lsw_get_secret(const struct connection *c,
 	    __func__,
 	    str_id(this_id, &this_buf),
 	    str_id(that_id, &that_buf),
-	    enum_name(&private_key_kind_names, kind));
+	    enum_name(&secret_kind_names, kind));
 
 	return lsw_find_secret_by_id(pluto_secrets, kind,
 				     this_id, that_id, asym);
@@ -471,7 +490,7 @@ struct secret *lsw_get_xauthsecret(char *xauthname)
 	};
 
 	best = lsw_find_secret_by_id(pluto_secrets,
-				     PKK_XAUTH,
+				     SECRET_XAUTH,
 				     &xa_id, NULL, true);
 
 	return best;
@@ -486,13 +505,13 @@ struct secret *lsw_get_xauthsecret(char *xauthname)
 
 const chunk_t *get_connection_psk(const struct connection *c)
 {
-	struct secret *s = lsw_get_secret(c, PKK_PSK, false);
+	struct secret *s = lsw_get_secret(c, SECRET_PSK, false);
 	if (s == NULL) {
 		dbg("no PreShared Key Found");
 		return NULL;
 	}
 
-	const chunk_t *psk = &lsw_get_pks(s)->u.preshared_secret;
+	const chunk_t *psk = &get_secret_stuff(s)->u.preshared_secret;
 	if (DBGP(DBG_CRYPT)) {
 		DBG_dump_hunk("PreShared Key", *psk);
 	}
@@ -504,14 +523,14 @@ const chunk_t *get_connection_psk(const struct connection *c)
 
 chunk_t *get_connection_ppk(const struct connection *c, chunk_t **ppk_id)
 {
-	struct secret *s = lsw_get_secret(c, PKK_PPK, false);
+	struct secret *s = lsw_get_secret(c, SECRET_PPK, false);
 
 	if (s == NULL) {
 		*ppk_id = NULL;
 		return NULL;
 	}
 
-	struct private_key_stuff *pks = lsw_get_pks(s);
+	struct secret_stuff *pks = get_secret_stuff(s);
 	*ppk_id = &pks->ppk_id;
 	if (DBGP(DBG_CRYPT)) {
 		DBG_log("Found PPK");
@@ -530,7 +549,7 @@ const chunk_t *get_ppk_by_id(const chunk_t *ppk_id)
 	struct secret *s = lsw_get_ppk_by_id(pluto_secrets, *ppk_id);
 
 	if (s != NULL) {
-		const struct private_key_stuff *pks = lsw_get_pks(s);
+		const struct secret_stuff *pks = get_secret_stuff(s);
 		if (DBGP(DBG_CRYPT)) {
 			DBG_dump_hunk("Found PPK:", pks->ppk);
 			DBG_dump_hunk("with PPK_ID:", *ppk_id);
@@ -546,7 +565,7 @@ const chunk_t *get_ppk_by_id(const chunk_t *ppk_id)
  * indicated by a NULL pointer.
  */
 
-const struct private_key_stuff *get_local_private_key(const struct connection *c,
+const struct secret_stuff *get_local_private_key(const struct connection *c,
 						      const struct pubkey_type *type,
 						      struct logger *logger)
 {
@@ -561,7 +580,7 @@ const struct private_key_stuff *get_local_private_key(const struct connection *c
 		    str_id(&c->remote->host.id, &that_buf),
 		    type->name);
 
-		const struct private_key_stuff *pks = NULL;
+		const struct secret_stuff *pks = NULL;
 		bool load_needed;
 		err_t err = find_or_load_private_key_by_cert(&pluto_secrets,
 							     &c->local->config->host.cert,
@@ -589,6 +608,8 @@ const struct private_key_stuff *get_local_private_key(const struct connection *c
 		 * If we don't find the right keytype (RSA, ECDSA,
 		 * etc) then best will end up as NULL
 		 */
+		pexpect(pks->kind == type->private_key_kind);
+		pexpect(pks->u.pubkey.content.type == type);
 		dbg("connection %s's %s private key found in NSS DB using cert",
 		    c->name, type->name);
 		return pks;
@@ -604,7 +625,7 @@ const struct private_key_stuff *get_local_private_key(const struct connection *c
 		    str_id(&c->remote->host.id, &that_buf),
 		    type->name);
 
-		const struct private_key_stuff *pks;
+		const struct secret_stuff *pks;
 		bool load_needed;
 		err_t err = find_or_load_private_key_by_ckaid(&pluto_secrets, c->local->config->host.ckaid,
 							      &pks, &load_needed, logger);
@@ -635,6 +656,8 @@ const struct private_key_stuff *get_local_private_key(const struct connection *c
 		 * If we don't find the right keytype (RSA, ECDSA,
 		 * etc) then best will end up as NULL
 		 */
+		pexpect(pks->kind == type->private_key_kind);
+		pexpect(pks->u.pubkey.content.type == type);
 		dbg("connection %s's %s private key found in NSS DB using CKAID",
 		    c->name, type->name);
 		return pks;
@@ -649,9 +672,11 @@ const struct private_key_stuff *get_local_private_key(const struct connection *c
 		return NULL;
 	}
 
-	const struct private_key_stuff *pks = lsw_get_pks(s);
+	const struct secret_stuff *pks = get_secret_stuff(s);
 	passert(pks != NULL);
 
+	pexpect(pks->kind == type->private_key_kind);
+	pexpect(pks->u.pubkey.content.type == type);
 	dbg("connection %s's %s private key found",
 	    c->name, type->name);
 	return pks;
@@ -722,36 +747,36 @@ static const char *check_expiry(realtime_t expiration_date, time_t warning_inter
 	return eb->buf;
 }
 
-static void show_pubkey(struct show *s, struct pubkey *key, bool utc, const char *expiry_message)
+static void show_pubkey(struct show *s, struct pubkey *pubkey, bool utc, const char *expiry_message)
 {
 	bool load_needed;
-	err_t load_err = preload_private_key_by_ckaid(&key->ckaid,
+	err_t load_err = preload_private_key_by_ckaid(&pubkey->content.ckaid,
 						      &load_needed,
 						      show_logger(s));
 	SHOW_JAMBUF(RC_COMMENT, s, buf) {
-		jam_realtime(buf, key->installed_time, utc);
+		jam_realtime(buf, pubkey->installed_time, utc);
 		jam(buf, ",");
-		jam(buf, " %4zd", 8 * key->size);
-		jam(buf, " %s", key->type->name);
-		jam(buf, " Key %s", str_keyid(key->keyid));
+		jam(buf, " %4zd", pubkey_strength_in_bits(pubkey));
+		jam(buf, " %s", pubkey->content.type->name);
+		jam(buf, " Key %s", str_keyid(pubkey->content.keyid));
 		jam(buf, " (%s private key),",
 		    (load_err != NULL ? "no" :
 		     load_needed ? "loaded" : "has"));
 		jam(buf, " until ");
-		jam_realtime(buf, key->until_time, utc);
+		jam_realtime(buf, pubkey->until_time, utc);
 		jam(buf, " %s", expiry_message == NULL ? "ok" : expiry_message);
 	}
 
 	id_buf idb;
 	esb_buf b;
 	show_comment(s, "       %s '%s'",
-		     enum_show(&ike_id_type_names, key->id.kind, &b),
-		     str_id(&key->id, &idb));
+		     enum_show(&ike_id_type_names, pubkey->id.kind, &b),
+		     str_id(&pubkey->id, &idb));
 
-	if (key->issuer.len > 0) {
+	if (pubkey->issuer.len > 0) {
 		dn_buf b;
 		show_comment(s, "       Issuer '%s'",
-			     str_dn(key->issuer, &b));
+			     str_dn(pubkey->issuer, &b));
 	}
 }
 
@@ -783,7 +808,7 @@ void show_pubkeys(struct show *s, bool utc, enum keys_to_show keys_to_show)
 err_t preload_private_key_by_cert(const struct cert *cert, bool *load_needed, struct logger *logger)
 {
 	threadtime_t start = threadtime_start();
-	const struct private_key_stuff *pks;
+	const struct secret_stuff *pks;
 	err_t err = find_or_load_private_key_by_cert(&pluto_secrets, cert,
 						     &pks, load_needed, logger);
 	threadtime_stop(&start, SOS_NOBODY, "%s() loading private key %s", __func__,
@@ -794,7 +819,7 @@ err_t preload_private_key_by_cert(const struct cert *cert, bool *load_needed, st
 err_t preload_private_key_by_ckaid(const ckaid_t *ckaid, bool *load_needed, struct logger *logger)
 {
 	threadtime_t start = threadtime_start();
-	const struct private_key_stuff *pks;
+	const struct secret_stuff *pks;
 	err_t err = find_or_load_private_key_by_ckaid(&pluto_secrets, ckaid,
 						      &pks, load_needed, logger);
 	threadtime_stop(&start, SOS_NOBODY, "%s() loading private key using CKAID", __func__);

@@ -65,7 +65,13 @@ src 192.1.2.45/32 dst 192.1.2.23/32
 		proto esp reqid REQID mode transport
 XFRM done
 IPSEC mangle TABLES
-NEW_IPSEC_CONN mangle TABLES
+iptables filter TABLE
+Chain INPUT (policy ACCEPT)
+target     prot opt source               destination         
+Chain FORWARD (policy ACCEPT)
+target     prot opt source               destination         
+Chain OUTPUT (policy ACCEPT)
+target     prot opt source               destination         
 ROUTING TABLES
 default via 192.1.2.254 dev eth1
 192.0.1.0/24 via 192.1.2.45 dev eth1
@@ -80,6 +86,6 @@ east #
  ipsec showstates
 000 #2: "labeled":500 STATE_V2_ESTABLISHED_IKE_SA (established IKE SA); REKEY in XXs; REPLACE in XXs; newest; idle;
 000 #3: "labeled"[1] 192.1.2.45:500 STATE_V2_ESTABLISHED_CHILD_SA (established Child SA); REKEY in XXs; REPLACE in XXs; newest; IKE SA #2; idle;
-000 #3: "labeled"[1] 192.1.2.45 esp.ESPSPIi@192.1.2.45 esp.ESPSPIi@192.1.2.23 Traffic: ESPin=64B ESPout=64B ESPmax=0B 
+000 #3: "labeled"[1] 192.1.2.45 esp.ESPSPIi@192.1.2.45 esp.ESPSPIi@192.1.2.23 Traffic: ESPin=64B ESPout=64B ESPmax=2^63B 
 east #
  

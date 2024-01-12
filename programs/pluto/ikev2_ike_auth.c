@@ -62,6 +62,7 @@
 #include "ikev2_cp.h"
 #include "kernel.h"			/* for install_sec_label_connection_policies() */
 #include "ikev2_delete.h"		/* for submit_v2_delete_exchange() */
+#include "ikev2_certreq.h"
 
 static stf_status process_v2_IKE_AUTH_request_tail(struct state *st,
 						   struct msg_digest *md,
@@ -80,6 +81,8 @@ static stf_status process_v2_IKE_AUTH_request_ipseckey_continue(struct ike_sa *i
 
 static stf_status process_v2_IKE_AUTH_request_id_tail(struct ike_sa *ike, struct msg_digest *md);
 
+static v2_auth_signature_cb process_v2_IKE_AUTH_request_auth_signature_continue; /* type check */
+
 static stf_status submit_v2_IKE_AUTH_request_signature(struct ike_sa *ike,
 						       const struct v2_id_payload *id_payload,
 						       const struct hash_desc *hash_algo,
@@ -88,7 +91,7 @@ static stf_status submit_v2_IKE_AUTH_request_signature(struct ike_sa *ike,
 {
 	struct crypt_mac hash_to_sign = v2_calculate_sighash(ike, &id_payload->mac, hash_algo,
 							     LOCAL_PERSPECTIVE);
-	if (!submit_v2_auth_signature(ike, &hash_to_sign, hash_algo, signer, cb)) {
+	if (!submit_v2_auth_signature(ike, &hash_to_sign, hash_algo, signer, cb, HERE)) {
 		dbg("submit_v2_auth_signature() died, fatal");
 		return STF_FATAL;
 	}
@@ -182,26 +185,26 @@ stf_status initiate_v2_IKE_AUTH_request(struct ike_sa *ike, struct msg_digest *m
 		return submit_v2_IKE_AUTH_request_signature(ike,
 							    &ike->sa.st_v2_id_payload,
 							    &ike_alg_hash_sha1,
-							    &pubkey_signer_pkcs1_1_5_rsa,
+							    &pubkey_signer_raw_pkcs1_1_5_rsa,
 							    initiate_v2_IKE_AUTH_request_signature_continue);
 
 	case IKEv2_AUTH_ECDSA_SHA2_256_P256:
 		return submit_v2_IKE_AUTH_request_signature(ike,
 							    &ike->sa.st_v2_id_payload,
 							    &ike_alg_hash_sha2_256,
-							    &pubkey_signer_ecdsa/*_p256*/,
+							    &pubkey_signer_raw_ecdsa/*_p256*/,
 							    initiate_v2_IKE_AUTH_request_signature_continue);
 	case IKEv2_AUTH_ECDSA_SHA2_384_P384:
 		return submit_v2_IKE_AUTH_request_signature(ike,
 							    &ike->sa.st_v2_id_payload,
 							    &ike_alg_hash_sha2_384,
-							    &pubkey_signer_ecdsa/*_p384*/,
+							    &pubkey_signer_raw_ecdsa/*_p384*/,
 							    initiate_v2_IKE_AUTH_request_signature_continue);
 	case IKEv2_AUTH_ECDSA_SHA2_512_P521:
 		return submit_v2_IKE_AUTH_request_signature(ike,
 							    &ike->sa.st_v2_id_payload,
 							    &ike_alg_hash_sha2_512,
-							    &pubkey_signer_ecdsa/*_p521*/,
+							    &pubkey_signer_raw_ecdsa/*_p521*/,
 							    initiate_v2_IKE_AUTH_request_signature_continue);
 
 	case IKEv2_AUTH_DIGSIG:
@@ -215,17 +218,23 @@ stf_status initiate_v2_IKE_AUTH_request(struct ike_sa *ike, struct msg_digest *m
 			return STF_FATAL;
 		}
 
+		const struct pubkey_signer *signer;
 		switch (authby) {
 		case AUTH_RSASIG:
 			/* XXX: way to force PKCS#1 1.5? */
-			ike->sa.st_v2_digsig.signer = &pubkey_signer_rsassa_pss;
+			signer = &pubkey_signer_digsig_rsassa_pss;
 			break;
 		case AUTH_ECDSA:
-			ike->sa.st_v2_digsig.signer = &pubkey_signer_ecdsa;
+			signer = &pubkey_signer_digsig_ecdsa;
 			break;
 		default:
 			bad_case(authby);
 		}
+		enum_buf ana;
+		dbg("digsig:   authby %s selects signer %s",
+		    str_enum(&keyword_auth_names, authby, &ana),
+		    signer->name);
+		ike->sa.st_v2_digsig.signer = signer;
 
 		return submit_v2_IKE_AUTH_request_signature(ike,
 							    &ike->sa.st_v2_id_payload,
@@ -609,8 +618,7 @@ stf_status process_v2_IKE_AUTH_request(struct ike_sa *ike,
 	struct payload_digest *cert_payloads = md->chain[ISAKMP_NEXT_v2CERT];
 	if (cert_payloads != NULL) {
 		submit_v2_cert_decode(ike, md, cert_payloads,
-				      process_v2_IKE_AUTH_request_post_cert_decode,
-				      "responder decoding certificates");
+				      process_v2_IKE_AUTH_request_post_cert_decode, HERE);
 		return STF_SUSPEND;
 	}
 
@@ -627,6 +635,26 @@ stf_status process_v2_IKE_AUTH_request_standard_payloads(struct ike_sa *ike, str
 		update_ike_endpoints(ike, md);
 
 	nat_traversal_change_port_lookup(md, &ike->sa); /* shouldn't this be ike? */
+
+	/*
+	 * Decode any certificate requests sent by the initiator.
+	 *
+	 * This acts as little more than a hint to the responder that
+	 * it should include it's CERT chain with its
+	 * proof-of-identity.
+	 *
+	 * The RFCs do discuss the idea of using this to refine the
+	 * connection.  Since the ID is available, why bother.
+	 */
+	process_v2CERTREQ_payload(ike, md);
+
+	/*
+	 * This both decodes the initiator's ID and, when necessary,
+	 * switches connection based on that ID.
+	 *
+	 * Conceivably, in a multi-homed scenario, it could also
+	 * switch based on the contents of the CERTREQ.
+	 */
 
 	diag_t d = ikev2_responder_decode_initiator_id(ike, md);
 	if (d != NULL) {
@@ -888,8 +916,6 @@ stf_status process_v2_IKE_AUTH_request_id_tail(struct ike_sa *ike, struct msg_di
 	return process_v2_IKE_AUTH_request_tail(&ike->sa, md, true);
 }
 
-static v2_auth_signature_cb process_v2_IKE_AUTH_request_auth_signature_continue; /* type check */
-
 static stf_status submit_v2_IKE_AUTH_response_signature(struct ike_sa *ike, struct msg_digest *md,
 							const struct v2_id_payload *id_payload,
 							const struct hash_desc *hash_algo,
@@ -898,7 +924,7 @@ static stf_status submit_v2_IKE_AUTH_response_signature(struct ike_sa *ike, stru
 {
 	struct crypt_mac hash_to_sign = v2_calculate_sighash(ike, &id_payload->mac, hash_algo,
 							     LOCAL_PERSPECTIVE);
-	if (!submit_v2_auth_signature(ike, &hash_to_sign, hash_algo, signer, cb)) {
+	if (!submit_v2_auth_signature(ike, &hash_to_sign, hash_algo, signer, cb, HERE)) {
 		dbg("submit_v2_auth_signature() died, fatal");
 		record_v2N_response(ike->sa.st_logger, ike, md,
 				    v2N_AUTHENTICATION_FAILED, NULL/*no data*/,
@@ -945,26 +971,26 @@ stf_status generate_v2_responder_auth(struct ike_sa *ike, struct msg_digest *md,
 		return submit_v2_IKE_AUTH_response_signature(ike, md,
 							     &ike->sa.st_v2_id_payload,
 							     &ike_alg_hash_sha1,
-							     &pubkey_signer_pkcs1_1_5_rsa,
+							     &pubkey_signer_raw_pkcs1_1_5_rsa,
 							     auth_cb);
 
 	case IKEv2_AUTH_ECDSA_SHA2_256_P256:
 		return submit_v2_IKE_AUTH_response_signature(ike, md,
 							    &ike->sa.st_v2_id_payload,
 							    &ike_alg_hash_sha2_256,
-							    &pubkey_signer_ecdsa/*_p256*/,
+							    &pubkey_signer_raw_ecdsa/*_p256*/,
 							    auth_cb);
 	case IKEv2_AUTH_ECDSA_SHA2_384_P384:
 		return submit_v2_IKE_AUTH_response_signature(ike, md,
 							    &ike->sa.st_v2_id_payload,
 							    &ike_alg_hash_sha2_384,
-							    &pubkey_signer_ecdsa/*_p384*/,
+							    &pubkey_signer_raw_ecdsa/*_p384*/,
 							    auth_cb);
 	case IKEv2_AUTH_ECDSA_SHA2_512_P521:
 		return submit_v2_IKE_AUTH_response_signature(ike, md,
 							    &ike->sa.st_v2_id_payload,
 							    &ike_alg_hash_sha2_512,
-							    &pubkey_signer_ecdsa/*_p521*/,
+							    &pubkey_signer_raw_ecdsa/*_p521*/,
 							    auth_cb);
 
 	case IKEv2_AUTH_DIGSIG:
@@ -1004,7 +1030,7 @@ stf_status generate_v2_responder_auth(struct ike_sa *ike, struct msg_digest *md,
 		case AUTH_RSASIG:
 			if (ike->sa.st_v2_digsig.signer == NULL ||
 			    ike->sa.st_v2_digsig.signer->type != &pubkey_type_rsa) {
-				ike->sa.st_v2_digsig.signer = &pubkey_signer_rsassa_pss;
+				ike->sa.st_v2_digsig.signer = &pubkey_signer_digsig_rsassa_pss;
 				signer_story = "from policy";
 			} else {
 				signer_story = "saved earlier";
@@ -1013,7 +1039,7 @@ stf_status generate_v2_responder_auth(struct ike_sa *ike, struct msg_digest *md,
 		case AUTH_ECDSA:
 			/* no choice */
 			signer_story = "hardwired";
-			ike->sa.st_v2_digsig.signer = &pubkey_signer_ecdsa;
+			ike->sa.st_v2_digsig.signer = &pubkey_signer_digsig_ecdsa;
 			break;
 		default:
 			bad_case(authby);
@@ -1295,8 +1321,7 @@ stf_status process_v2_IKE_AUTH_response(struct ike_sa *ike, struct child_sa *unu
 	struct payload_digest *cert_payloads = md->chain[ISAKMP_NEXT_v2CERT];
 	if (cert_payloads != NULL) {
 		submit_v2_cert_decode(ike, md, cert_payloads,
-				      process_v2_IKE_AUTH_response_post_cert_decode,
-				      "initiator decoding certificates");
+				      process_v2_IKE_AUTH_response_post_cert_decode, HERE);
 		return STF_SUSPEND;
 	} else {
 		dbg("no certs to decode");

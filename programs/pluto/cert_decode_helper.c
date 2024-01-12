@@ -73,11 +73,11 @@ struct task_handler cert_decode_handler = {
 };
 
 void submit_v2_cert_decode(struct ike_sa *ike,
-			struct msg_digest *md, struct payload_digest *cert_payloads,
-			cert_decode_cb *cb, const char *why)
+			   struct msg_digest *md, struct payload_digest *cert_payloads,
+			   cert_decode_cb *cb, where_t where)
 {
 	struct task task = {
-		.root_certs = root_certs_addref(HERE),
+		.root_certs = root_certs_addref(),
 		.md = md_addref(md),
 		.cert_payloads = cert_payloads,
 		.cb = cb,
@@ -93,7 +93,7 @@ void submit_v2_cert_decode(struct ike_sa *ike,
 	submit_task(ike->sa.st_logger,
 		    /*resume IKE*/&ike->sa,
 		    clone_thing(task, "decode certificate payload task"),
-		    &cert_decode_handler, why);
+		    &cert_decode_handler, where);
 }
 
 static void cert_decode_computer(struct logger *logger,
@@ -192,6 +192,6 @@ static void cert_decode_cleanup(struct task **task)
 	release_certs(&(*task)->verified.cert_chain);	/* may be NULL */
 	free_public_keys(&(*task)->verified.pubkey_db);	/* may be NULL */
 	md_delref(&(*task)->md);
-	root_certs_delref(&(*task)->root_certs, HERE);
+	root_certs_delref(&(*task)->root_certs);
 	pfreeany((*task));
 }

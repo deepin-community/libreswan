@@ -58,14 +58,20 @@ enum ike_version {
 #define FIPS_IKE_SA_LIFETIME_MAXIMUM secs_per_hour * 24
 #define FIPS_MIN_RSA_KEY_SIZE 2048 /* 112 bits, see SP800-131A */
 
+/*
+ * XFRM_INF is a uint64_t, hence use that to define upper bound of
+ * constant.
+ */
+#define IPSEC_SA_MAX_OPERATIONS (UINT64_C(1) << 63)
+#define IPSEC_SA_MAX_OPERATIONS_STRING "2^63"		/* how to print IPSEC_SA_MAX_OPERATIONS */
+#define IPSEC_SA_MAX_SOFT_LIMIT_PERCENTAGE 50
+
 #define PLUTO_SHUNT_LIFE_DURATION_DEFAULT (15 * secs_per_minute)
 #define PLUTO_HALFOPEN_SA_LIFE (secs_per_minute )
 
 #define SA_REPLACEMENT_MARGIN_DEFAULT (9 * secs_per_minute) /* IPSEC & IKE */
 #define SA_REPLACEMENT_FUZZ_DEFAULT 100 /* (IPSEC & IKE) 100% of MARGIN */
 #define SA_REPLACEMENT_RETRIES_DEFAULT 0 /* (IPSEC & IKE) */
-
-#define SA_LIFE_DURATION_K_DEFAULT 0xFFFFFFFFlu
 
 #define IKE_BUF_AUTO 0 /* use system values for IKE socket buffer size */
 
@@ -184,8 +190,8 @@ enum global_timer {
 	EVENT_FREE_ROOT_CERTS,
 #define FREE_ROOT_CERTS_TIMEOUT		deltatime(5 * secs_per_minute)
 
-	EVENT_RESET_LOG_RATE_LIMIT,	/* set nr. rate limited log messages back to 0 */
-#define RESET_LOG_RATE_LIMIT		deltatime(secs_per_hour)
+	EVENT_RESET_LOG_LIMITER,	/* set rate limited log message count back to 0 */
+#define RESET_LOG_LIMITER_FREQUENCY	deltatime(secs_per_hour)
 
 	EVENT_NAT_T_KEEPALIVE,		/* NAT Traversal Keepalive */
 
@@ -575,7 +581,7 @@ enum perspective {
 	REMOTE_PERSPECTIVE,
 };
 
-extern enum_names perspective_names;
+extern const struct enum_names perspective_names;
 
 /*
  * The IKEv2 message role.  Is this message a request or a response
@@ -1018,7 +1024,18 @@ enum pluto_exit_code {
 	PLUTO_EXIT_SHELL_COMMAND_NOT_EXECUTABLE = 127,
 };
 
-extern enum_names pluto_exit_code_names;
+extern const struct enum_names pluto_exit_code_names;
+/*
+ * EXPIRE type events from the kernel.
+ * Based on these, different actions can be taken, eg skipping delete SPI
+ */
+
+enum sa_expire_kind {
+	/* 0 reserved */
+	SA_ACTIVE = 1 << 1,
+	SA_SOFT_EXPIRED = 1 << 2,
+	SA_HARD_EXPIRED = 1 << 3,
+};
 
 #define SWAN_MAX_DOMAIN_LEN 256 /* includes nul termination */
 

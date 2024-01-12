@@ -48,7 +48,13 @@ src 192.0.2.0/24 dst 192.0.1.0/24
 		proto esp reqid REQID mode tunnel
 XFRM done
 IPSEC mangle TABLES
-NEW_IPSEC_CONN mangle TABLES
+iptables filter TABLE
+Chain INPUT (policy ACCEPT)
+target     prot opt source               destination         
+Chain FORWARD (policy ACCEPT)
+target     prot opt source               destination         
+Chain OUTPUT (policy ACCEPT)
+target     prot opt source               destination         
 ROUTING TABLES
 default via 192.1.2.254 dev eth1
 192.0.1.0/24 dev eth1 scope link src 192.0.2.254
@@ -68,8 +74,8 @@ west-ec                                                      P,,
 east #
  # expect state #2, state #1 responded with INVALID_KE
 east #
- if [ -f /var/run/pluto/pluto.pid ]; then grep "authenticated using .*RSA" /tmp/pluto.log ; fi
-"westnet-eastnet-ikev2" #2: responder established IKE SA; authenticated using PKCS#1 1.5 RSA with SHA1 and preloaded certificate 'C=CA, ST=Ontario, L=Toronto, O=Libreswan, OU=Test Department, CN=west.testing.libreswan.org, E=user-west@testing.libreswan.org' issued by CA 'C=CA, ST=Ontario, L=Toronto, O=Libreswan, OU=Test Department, CN=Libreswan test CA for mainca, E=testing@libreswan.org'
+ if [ -f /var/run/pluto/pluto.pid ]; then grep " authenticated peer " /tmp/pluto.log ; fi
+"westnet-eastnet-ikev2" #2: responder established IKE SA; authenticated peer '3072-bit PKCS#1 1.5 RSA with SHA1' signature using preloaded certificate 'C=CA, ST=Ontario, L=Toronto, O=Libreswan, OU=Test Department, CN=west.testing.libreswan.org, E=user-west@testing.libreswan.org' issued by CA 'C=CA, ST=Ontario, L=Toronto, O=Libreswan, OU=Test Department, CN=Libreswan test CA for mainca, E=testing@libreswan.org'
 east #
  if [ -f /var/run/charon.pid -o -f /var/run/strongswan/charon.pid ]; then strongswan status ; fi
 east #

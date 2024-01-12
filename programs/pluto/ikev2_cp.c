@@ -64,18 +64,16 @@ static stf_status ikev2_ship_cp_attr_ip(uint16_t type, ip_address *ip,
 		return STF_INTERNAL_ERROR;
 
 	if (attr.len > 0) {
-		diag_t d = pbs_out_address(&a_pbs, *ip, story);
-		if (d != NULL) {
-			llog_diag(RC_LOG_SERIOUS, a_pbs.outs_logger, &d, "%s", "");
+		if (!pbs_out_address(&a_pbs, *ip, story)) {
+			/* already logged */
 			return STF_INTERNAL_ERROR;
 		}
 	}
 
 	if (attr.len == INTERNAL_IP6_ADDRESS_SIZE) { /* IPv6 address add prefix */
 		uint8_t ipv6_prefix_len = INTERNL_IP6_PREFIX_LEN;
-		diag_t d = pbs_out_raw(&a_pbs, &ipv6_prefix_len, sizeof(uint8_t), "INTERNL_IP6_PREFIX_LEN");
-		if (d != NULL) {
-			llog_diag(RC_LOG_SERIOUS, outpbs->outs_logger, &d, "%s", "");
+		if (!pbs_out_raw(&a_pbs, &ipv6_prefix_len, sizeof(uint8_t), "INTERNL_IP6_PREFIX_LEN")) {
+			/* already logged */
 			return STF_INTERNAL_ERROR;
 		}
 	}
@@ -84,32 +82,31 @@ static stf_status ikev2_ship_cp_attr_ip(uint16_t type, ip_address *ip,
 	return STF_OK;
 }
 
-static diag_t emit_v2CP_attribute(struct pbs_out *outpbs,
-				  uint16_t type, shunk_t attrib,
-				  const char *story)
+static bool emit_v2CP_attribute(struct pbs_out *outpbs,
+				uint16_t type, shunk_t attrib,
+				const char *story)
 {
-	diag_t d;
 	struct ikev2_cp_attribute attr = {
 		.type = type,
 		.len = attrib.len,
 	};
 
 	pb_stream a_pbs;
-	d = pbs_out_struct(outpbs, &ikev2_cp_attribute_desc,
-			   &attr, sizeof(attr), &a_pbs);
-	if (d != NULL) {
-		return d;
+	if (!pbs_out_struct(outpbs, &ikev2_cp_attribute_desc,
+			    &attr, sizeof(attr), &a_pbs)) {
+		/* already logged */
+		return false; /*fatal*/
 	}
 
 	if (attrib.len > 0) {
-		diag_t d = pbs_out_hunk(&a_pbs, attrib, story);
-		if (d != NULL) {
-			return d;
+		if (!pbs_out_hunk(&a_pbs, attrib, story)) {
+			/* already logged */
+			return false;
 		}
 	}
 
 	close_output_pbs(&a_pbs);
-	return NULL;
+	return true;
 }
 
 /*
@@ -159,13 +156,11 @@ bool emit_v2_child_configuration_payload(const struct child_sa *child, struct pb
 
 		for (const shunk_t *domain = c->config->modecfg.domains;
 		     domain != NULL && domain->ptr != NULL; domain++) {
-			diag_t d = emit_v2CP_attribute(&cp_pbs,
-						       IKEv2_INTERNAL_DNS_DOMAIN,
-						       *domain,
-						       "IKEv2_INTERNAL_DNS_DOMAIN");
-			if (d != NULL) {
-				llog_diag(RC_LOG_SERIOUS, outpbs->outs_logger, &d,
-					  "%s", "");
+			if (!emit_v2CP_attribute(&cp_pbs,
+						 IKEv2_INTERNAL_DNS_DOMAIN,
+						 *domain,
+						 "IKEv2_INTERNAL_DNS_DOMAIN")) {
+				/* already logged */
 				return false;
 			}
 		}

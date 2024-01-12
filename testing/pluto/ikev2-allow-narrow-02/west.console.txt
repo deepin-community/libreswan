@@ -17,7 +17,7 @@ west #
 000 "westnet-eastnet-ikev2":   our auth:rsasig(RSASIG+RSASIG_v1_5), their auth:RSASIG+ECDSA+RSASIG_v1_5, our autheap:none, their autheap:none;
 000 "westnet-eastnet-ikev2":   modecfg info: us:none, them:none, modecfg policy:push, dns:unset, domains:unset, cat:unset;
 000 "westnet-eastnet-ikev2":   sec_label:unset;
-000 "westnet-eastnet-ikev2":   ike_life: 28800s; ipsec_life: 28800s; replay_window: 128; rekey_margin: 540s; rekey_fuzz: 100%; keyingtries: 0;
+000 "westnet-eastnet-ikev2":   ike_life: 28800s; ipsec_life: 28800s; ipsec_max_bytes: 2^63B; ipsec_max_packets: 2^63; replay_window: 128; rekey_margin: 540s; rekey_fuzz: 100%; keyingtries: 0;
 000 "westnet-eastnet-ikev2":   retransmit-interval: 9999ms; retransmit-timeout: 99s; iketcp:no; iketcp-port:4500;
 000 "westnet-eastnet-ikev2":   initial-contact:no; cisco-unity:no; fake-strongswan:no; send-vendorid:no; send-no-esp-tfc:no;
 000 "westnet-eastnet-ikev2":   policy: IKEv2+RSASIG+ECDSA+RSASIG_v1_5+ENCRYPT+TUNNEL+PFS+IKE_FRAG_ALLOW+ESN_NO+ESN_YES;
@@ -27,7 +27,7 @@ west #
 000 "westnet-eastnet-ikev2":   our idtype: ID_FQDN; our id=@west; their idtype: ID_FQDN; their id=@east
 000 "westnet-eastnet-ikev2":   liveness: passive; dpdaction:hold; dpddelay:0s; retransmit-timeout:60s
 000 "westnet-eastnet-ikev2":   nat-traversal: encaps:auto; keepalive:20s
-000 "westnet-eastnet-ikev2":   newest ISAKMP SA: #0; newest IPsec SA: #0; conn serial: $1;
+000 "westnet-eastnet-ikev2":   newest IKE SA: #0; newest IPsec SA: #0; conn serial: $1;
 west #
  echo "initdone"
 initdone
@@ -36,13 +36,13 @@ west #
 west #
  ipsec auto --up westnet-eastnet-ikev2
 1v2 "westnet-eastnet-ikev2" #1: initiating IKEv2 connection
-1v2 "westnet-eastnet-ikev2" #1: sent IKE_SA_INIT request
+1v2 "westnet-eastnet-ikev2" #1: sent IKE_SA_INIT request to 192.1.2.23:500
 1v2 "westnet-eastnet-ikev2" #1: sent IKE_AUTH request {cipher=AES_GCM_16_256 integ=n/a prf=HMAC_SHA2_512 group=MODP2048}
-003 "westnet-eastnet-ikev2" #1: initiator established IKE SA; authenticated using RSASSA-PSS with SHA2_512 and preloaded certificate '@east'
+003 "westnet-eastnet-ikev2" #1: initiator established IKE SA; authenticated peer '2nnn-bit RSASSA-PSS with SHA2_512' digital signature using preloaded certificate '@east'
 003 "westnet-eastnet-ikev2" #2: CHILD SA failed: TS_UNACCEPTABLE
 003 "westnet-eastnet-ikev2" #1: IKE SA established but initiator rejected Child SA response
 002 "westnet-eastnet-ikev2" #2: deleting larval Child SA using IKE SA #1
-003 "westnet-eastnet-ikev2" #2: ERROR: netlink response for Del SA esp.ESPSPIi@192.1.2.23 included errno 3: No such process
+003 ERROR: "westnet-eastnet-ikev2" #2: netlink response for Del SA esp.ESPSPIi@192.1.2.23: No such process (errno 3)
 west #
  echo done
 done

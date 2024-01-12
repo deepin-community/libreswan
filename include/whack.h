@@ -87,7 +87,8 @@ struct whack_end {
 	 */
 	char *cert;
 	char *ckaid;
-	char *rsasigkey;
+	char *pubkey;
+	enum ipseckey_algorithm_type pubkey_alg;
 
 	enum keyword_auth auth;
 
@@ -182,9 +183,11 @@ struct whack_message {
 	deltatime_t sa_ike_life_seconds;
 	deltatime_t sa_ipsec_life_seconds;
 	deltatime_t sa_rekey_margin;
+	uintmax_t sa_ipsec_max_bytes;
+	uintmax_t sa_ipsec_max_packets;
 	unsigned long sa_rekey_fuzz;
 	unsigned long sa_keying_tries;
-	unsigned long sa_replay_window;
+	uintmax_t sa_replay_window;
 	deltatime_t retransmit_timeout;
 	deltatime_t retransmit_interval;
 	enum yna_options nic_offload;
@@ -267,7 +270,7 @@ struct whack_message {
 	bool whack_key;
 	bool whack_addkey;
 	char *keyid;	/* string 8 */
-	enum pubkey_alg pubkey_alg;
+	enum ipseckey_algorithm_type pubkey_alg;
 	chunk_t keyval;	/* chunk */
 
 	/* for REMOTE_HOST */

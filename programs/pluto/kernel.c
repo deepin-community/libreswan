@@ -82,6 +82,7 @@
 #include "ip_selector.h"
 #include "ip_encap.h"
 #include "show.h"
+#include "rekeyfuzz.h"
 
 static bool route_and_eroute(struct connection *c,
 			     struct spd_route *sr,
@@ -89,7 +90,9 @@ static bool route_and_eroute(struct connection *c,
 			     /* st or c */
 			     struct logger *logger);
 
-static bool eroute_connection(enum kernel_policy_op op, const char *opname,
+static bool eroute_connection(enum kernel_policy_op op,
+			      enum kernel_policy_dir dir,
+			      const char *opname,
 			      const struct spd_route *sr,
 			      enum shunt_policy shunt_policy,
 			      const struct kernel_policy *kernel_policy,
@@ -104,16 +107,16 @@ static bool invoke_command(const char *verb, const char *verb_suffix,
 			   const char *cmd, struct logger *logger);
 
 /*
- * Add/replace/delete a shunt eroute.
+ * Add/replace/delete an outbound bare kernel policy, aka shunt.
  *
- * Such an eroute determines the fate of packets without the use
- * of any SAs.  These are defaults, in effect.
- * If a negotiation has not been attempted, use %trap.
- * If negotiation has failed, the choice between %trap/%pass/%drop/%reject
- * is specified in the policy of connection c.
+ * Such a kernel policy determines the fate of packets without the use
+ * of any SAs.  These are defaults, in effect.  If a negotiation has
+ * not been attempted, use %trap.  If negotiation has failed, the
+ * choice between %trap/%pass/%drop/%reject is specified in the policy
+ * of connection c.
  *
- * The kernel policy is bare (naked, global) it is not paired with a
- * kernel state.
+ * The kernel policy is refered to as bare (naked, global) as it is
+ * not paired with a kernel state.
  */
 
 static bool bare_policy_op(enum kernel_policy_op op,
@@ -140,6 +143,7 @@ static bool bare_policy_op(enum kernel_policy_op op,
 
 	LSWDBGP(DBG_BASE, buf) {
 		jam(buf, "kernel: %s() ", __func__);
+
 		jam_enum_short(buf, &kernel_policy_op_names, op);
 
 		jam_string(buf, " ");
@@ -174,24 +178,18 @@ static bool bare_policy_op(enum kernel_policy_op op,
 		 * and opname.
 		 */
 		switch (op) {
-		case KP_REPLACE_OUTBOUND:
+		case KERNEL_POLICY_OP_REPLACE:
 			/* replace with nothing == delete */
-			op = KP_DELETE_OUTBOUND;
+			op = KERNEL_POLICY_OP_DELETE;
 			opname = "delete";
 			break;
-		case KP_ADD_OUTBOUND:
+		case KERNEL_POLICY_OP_ADD:
 			/* add nothing == do nothing */
 			return true;
 
-		case KP_DELETE_OUTBOUND:
+		case KERNEL_POLICY_OP_DELETE:
 			/* delete remains delete */
 			break;
-
-		case KP_ADD_INBOUND:
-		case KP_REPLACE_INBOUND:
-		case KP_DELETE_INBOUND:
-			/* never inbound */
-			bad_case(op);
 		}
 	}
 
@@ -202,31 +200,27 @@ static bool bare_policy_op(enum kernel_policy_op op,
 		 */
 		passert(eclipsable(sr));
 		switch (op) {
-		case KP_REPLACE_OUTBOUND:
+		case KERNEL_POLICY_OP_REPLACE:
 			/* really an add */
-			op = KP_ADD_OUTBOUND;
+			op = KERNEL_POLICY_OP_ADD;
 			opname = "replace eclipsed";
 			break;
-		case KP_DELETE_OUTBOUND:
+		case KERNEL_POLICY_OP_DELETE:
 			/*
 			 * delete unnecessary:
 			 * we don't actually have an eroute
 			 */
 			return true;
-
-		case KP_ADD_OUTBOUND: /*never eclipsed add*/
-		case KP_ADD_INBOUND:
-		case KP_REPLACE_INBOUND:
-		case KP_DELETE_INBOUND:
-			/* never inbound */
+		case KERNEL_POLICY_OP_ADD:
+			/*never eclipsed add*/
 			bad_case(op);
 		}
-	} else if (op == KP_DELETE_OUTBOUND) {
+	} else if (op == KERNEL_POLICY_OP_DELETE) {
 		/* maybe we are uneclipsing something */
 		struct spd_route *esr = eclipsing(sr);
 		if (esr != NULL) {
 			set_spd_routing(esr, RT_ROUTED_PROSPECTIVE);
-			return bare_policy_op(KP_REPLACE_OUTBOUND,
+			return bare_policy_op(KERNEL_POLICY_OP_REPLACE,
 					      EXPECT_KERNEL_POLICY_OK,
 					      esr->connection, esr,
 					      RT_ROUTED_PROSPECTIVE,
@@ -249,12 +243,11 @@ static bool bare_policy_op(enum kernel_policy_op op,
 	 * Use raw_policy() as it gives a better log result.
 	 */
 
-	bool delete = (op & KERNEL_POLICY_DELETE);
+	bool delete = (op == KERNEL_POLICY_OP_DELETE);
 
-	pexpect(op & KERNEL_POLICY_OUTBOUND);
 	struct kernel_policy outbound_kernel_policy =
 		bare_kernel_policy(&sr->this.client, &sr->that.client);
-	if (!raw_policy(op,
+	if (!raw_policy(op, KERNEL_POLICY_DIR_OUTBOUND,
 			EXPECT_KERNEL_POLICY_OK,
 			&outbound_kernel_policy.src.client,
 			&outbound_kernel_policy.dst.client,
@@ -269,16 +262,10 @@ static bool bare_policy_op(enum kernel_policy_op op,
 		return false;
 
 	switch (op) {
-	case KP_ADD_OUTBOUND:
-		op = KP_ADD_INBOUND;
+	case KERNEL_POLICY_OP_ADD:
+	case KERNEL_POLICY_OP_DELETE:
 		break;
-	case KP_DELETE_OUTBOUND:
-		op = KP_DELETE_INBOUND;
-		break;
-	case KP_REPLACE_OUTBOUND:
-	case KP_ADD_INBOUND:
-	case KP_REPLACE_INBOUND:
-	case KP_DELETE_INBOUND:
+	case KERNEL_POLICY_OP_REPLACE:
 		return true;
 	}
 
@@ -292,7 +279,8 @@ static bool bare_policy_op(enum kernel_policy_op op,
 	 */
 	struct kernel_policy inbound_kernel_policy =
 		bare_kernel_policy(&sr->that.client, &sr->this.client);
-	return raw_policy(op, expect_kernel_policy,
+	return raw_policy(op, KERNEL_POLICY_DIR_INBOUND,
+			  expect_kernel_policy,
 			  &inbound_kernel_policy.src.client,
 			  &inbound_kernel_policy.dst.client,
 			  shunt_policy,
@@ -463,12 +451,11 @@ static const char *said_str(const ip_address dst,
 ipsec_spi_t get_ipsec_spi(ipsec_spi_t avoid,
 			  const struct ip_protocol *proto,
 			  const struct spd_route *sr,
-			  bool tunnel,
 			  struct logger *logger)
 {
 	passert(proto == &ip_protocol_ah || proto == &ip_protocol_esp);
 	return kernel_ops_get_ipsec_spi(avoid, &sr->that.host->addr,
-					&sr->this.host->addr, proto, tunnel,
+					&sr->this.host->addr, proto,
 					get_proto_reqid(sr->reqid, proto),
 					IPSEC_DOI_SPI_OUR_MIN, 0xffffffffU,
 					"SPI", logger);
@@ -482,14 +469,12 @@ ipsec_spi_t get_ipsec_spi(ipsec_spi_t avoid,
  * If we can't find one easily, return 0 (a bad SPI,
  * no matter what order) indicating failure.
  */
-ipsec_spi_t get_my_cpi(const struct spd_route *sr, bool tunnel,
-		       struct logger *logger)
+ipsec_spi_t get_ipsec_cpi(const struct spd_route *sr, struct logger *logger)
 {
 	return kernel_ops_get_ipsec_spi(0,
 					&sr->that.host->addr,
 					&sr->this.host->addr,
 					&ip_protocol_ipcomp,
-					tunnel,
 					get_proto_reqid(sr->reqid, &ip_protocol_ipcomp),
 					IPCOMP_FIRST_NEGOTIATED,
 					IPCOMP_LAST_NEGOTIATED,
@@ -607,7 +592,7 @@ bool fmt_common_shell_out(char *buf,
 	for (struct pubkey_list *p = pluto_pubkeys; p != NULL; p = p->next) {
 		struct pubkey *key = p->key;
 		int pathlen;	/* value ignored */
-		if (key->type == &pubkey_type_rsa &&
+		if (key->content.type == &pubkey_type_rsa &&
 		    same_id(&c->remote->host.id, &key->id) &&
 		    trusted_ca(key->issuer, ASN1(sr->that.config->host.ca), &pathlen)) {
 			jam_dn_or_null(&jb, key->issuer, "", jam_shell_quoted_bytes);
@@ -668,10 +653,10 @@ bool fmt_common_shell_out(char *buf,
 		 * be a single "atomic" call?
 		 */
 		if (get_sa_bundle_info(st, true, NULL)) {
-			JDuint64("PLUTO_INBYTES", first_pi->our_bytes);
+			JDuint64("PLUTO_INBYTES", first_pi->inbound.bytes);
 		}
 		if (get_sa_bundle_info(st, false, NULL)) {
-			JDuint64("PLUTO_OUTBYTES", first_pi->peer_bytes);
+			JDuint64("PLUTO_OUTBYTES", first_pi->outbound.bytes);
 		}
 	}
 
@@ -713,8 +698,8 @@ bool fmt_common_shell_out(char *buf,
 	}
 
 	jam(&jb, "SPI_IN=0x%x SPI_OUT=0x%x " /* SPI_IN SPI_OUT */,
-		first_pi == NULL ? 0 : ntohl(first_pi->attrs.spi),
-		first_pi == NULL ? 0 : ntohl(first_pi->our_spi));
+		first_pi == NULL ? 0 : ntohl(first_pi->outbound.spi),
+		first_pi == NULL ? 0 : ntohl(first_pi->inbound.spi));
 
 	return jambuf_ok(&jb);
 
@@ -866,9 +851,9 @@ bool invoke_command(const char *verb, const char *verb_suffix, const char *cmd,
 
 			if (fgets(resp, sizeof(resp), f) == NULL) {
 				if (ferror(f)) {
-					log_errno(logger, errno,
-						  "fgets failed on output of %s%s command",
-						  verb, verb_suffix);
+					llog_error(logger, errno,
+						   "fgets failed on output of %s%s command",
+						   verb, verb_suffix);
 					pclose(f);
 					return false;
 				} else {
@@ -890,9 +875,9 @@ bool invoke_command(const char *verb, const char *verb_suffix, const char *cmd,
 			int r = pclose(f);
 
 			if (r == -1) {
-				log_errno(logger, errno,
-					  "pclose failed for %s%s command",
-					  verb, verb_suffix);
+				llog_error(logger, errno,
+					   "pclose failed for %s%s command",
+					   verb, verb_suffix);
 				return false;
 			} else if (WIFEXITED(r)) {
 				if (WEXITSTATUS(r) != 0) {
@@ -1306,13 +1291,12 @@ static bool sag_eroute(const struct state *st,
 	/* check for no transform at all */
 	passert(kernel_policy.nr_rules > 0);
 
-	pexpect(op & KERNEL_POLICY_OUTBOUND);
-
 	/* hack */
 	char why[256];
 	snprintf(why, sizeof(why), "%s() %s", __func__, opname);
 
-	return eroute_connection(op, why, sr, SHUNT_UNSET,
+	return eroute_connection(op, KERNEL_POLICY_DIR_OUTBOUND,
+				 why, sr, SHUNT_UNSET,
 				 &kernel_policy,
 				 calculate_sa_prio(c, false),
 				 &c->sa_marks, c->xfrmi,
@@ -1376,7 +1360,7 @@ void unroute_connection(struct connection *c)
 			 * in fact the connection shouldn't even have
 			 * inbound policies, just the state.
 			 */
-			bare_policy_op(KP_DELETE_OUTBOUND,
+			bare_policy_op(KERNEL_POLICY_OP_DELETE,
 				       EXPECT_NO_INBOUND,
 				       c, sr, RT_UNROUTED,
 				       "unrouting connection",
@@ -1493,7 +1477,8 @@ static bool delete_bare_shunt_kernel_policy(const struct bare_shunt *bsp,
 	dbg("kernel: deleting bare shunt %s from kernel "PRI_WHERE,
 	    str_selectors(&src, &dst, &sb), pri_where(where));
 	/* assume low code logged action */
-	return raw_policy(KP_DELETE_OUTBOUND,
+	return raw_policy(KERNEL_POLICY_OP_DELETE,
+			  KERNEL_POLICY_DIR_OUTBOUND,
 			  EXPECT_KERNEL_POLICY_OK,
 			  &src, &dst,
 			  SHUNT_PASS,
@@ -1558,7 +1543,9 @@ bool flush_bare_shunt(const ip_address *src_address,
 	dbg("kernel: deleting bare shunt %s from kernel for %s",
 	    str_selectors(&src, &dst, &sb), why);
 	/* assume low code logged action */
-	bool ok = raw_policy(KP_DELETE_OUTBOUND, expect_kernel_policy,
+	bool ok = raw_policy(KERNEL_POLICY_OP_DELETE,
+			     KERNEL_POLICY_DIR_OUTBOUND,
+			     expect_kernel_policy,
 			     &src, &dst,
 			     SHUNT_PASS,
 			     /*kernel_policy*/NULL/*delete->no-policy-rules*/,
@@ -1635,7 +1622,8 @@ bool install_sec_label_connection_policies(struct connection *c, struct logger *
 			/* XXX: log? */
 			return false;
 		}
-		if (!raw_policy(inbound ? KP_ADD_INBOUND : KP_ADD_OUTBOUND,
+		if (!raw_policy(KERNEL_POLICY_OP_ADD,
+				(inbound ? KERNEL_POLICY_DIR_INBOUND : KERNEL_POLICY_DIR_OUTBOUND),
 				EXPECT_KERNEL_POLICY_OK,
 				&kernel_policy.src.client, &kernel_policy.dst.client,
 				SHUNT_UNSET,
@@ -1658,7 +1646,8 @@ bool install_sec_label_connection_policies(struct connection *c, struct logger *
 				 */
 				dbg("pulling previously installed outbound policy");
 				pexpect(direction == ENCAP_DIRECTION_INBOUND);
-				raw_policy(KP_DELETE_OUTBOUND,
+				raw_policy(KERNEL_POLICY_OP_DELETE,
+					   KERNEL_POLICY_DIR_OUTBOUND,
 					   EXPECT_KERNEL_POLICY_OK,
 					   &c->spd.this.client, &c->spd.that.client,
 					   SHUNT_UNSET,
@@ -1691,7 +1680,9 @@ bool install_sec_label_connection_policies(struct connection *c, struct logger *
 			struct end *src = inbound ? &c->spd.that : &c->spd.this;
 			struct end *dst = inbound ? &c->spd.this : &c->spd.that;
 			/* ignore result */
-			raw_policy(inbound ? KP_DELETE_INBOUND : KP_DELETE_OUTBOUND,
+			raw_policy(KERNEL_POLICY_OP_DELETE,
+				   (inbound ? KERNEL_POLICY_DIR_INBOUND :
+				    KERNEL_POLICY_DIR_OUTBOUND),
 				   EXPECT_KERNEL_POLICY_OK,
 				   &src->client, &dst->client,
 				   SHUNT_PASS,
@@ -1711,7 +1702,9 @@ bool install_sec_label_connection_policies(struct connection *c, struct logger *
 	return true;
 }
 
-bool eroute_connection(enum kernel_policy_op op, const char *opname,
+bool eroute_connection(enum kernel_policy_op op,
+		       enum kernel_policy_dir dir,
+		       const char *opname,
 		       const struct spd_route *sr,
 		       enum shunt_policy shunt_policy,
 		       const struct kernel_policy *kernel_policy,
@@ -1723,7 +1716,8 @@ bool eroute_connection(enum kernel_policy_op op, const char *opname,
 {
 	if (sr->this.has_cat) {
 		ip_selector client = selector_from_address(sr->this.host->addr);
-		bool t = raw_policy(op, EXPECT_KERNEL_POLICY_OK,
+		bool t = raw_policy(op, dir,
+				    EXPECT_KERNEL_POLICY_OK,
 				    &client, &kernel_policy->dst.route,
 				    shunt_policy,
 				    kernel_policy,
@@ -1741,7 +1735,7 @@ bool eroute_connection(enum kernel_policy_op op, const char *opname,
 		dbg("kernel: %s CAT extra route added return=%d", __func__, t);
 	}
 
-	return raw_policy(op,
+	return raw_policy(op, dir,
 			  EXPECT_KERNEL_POLICY_OK,
 			  &kernel_policy->src.route, &kernel_policy->dst.route,
 			  shunt_policy,
@@ -1816,22 +1810,21 @@ bool assign_holdpass(const struct connection *c,
 		 * Once the broad %hold is in place, delete the narrow one.
 		 */
 		if (rn != ro) {
-			int op;
+			enum kernel_policy_op op;
 			const char *reason;
 
 			if (erouted(ro)) {
-				op = KP_REPLACE_OUTBOUND;
+				op = KERNEL_POLICY_OP_REPLACE;
 				reason = "assign_holdpass() replace %trap with broad %pass or %hold";
 			} else {
-				op = KP_ADD_OUTBOUND;
+				op = KERNEL_POLICY_OP_ADD;
 				reason = "assign_holdpass() add broad %pass or %hold";
 			}
 
-			pexpect(op & KERNEL_POLICY_OUTBOUND);
-
 			struct kernel_policy outbound_kernel_policy =
 				bare_kernel_policy(&sr->this.client, &sr->that.client);
-			if (eroute_connection(op, reason, sr, negotiation_shunt,
+			if (eroute_connection(op, KERNEL_POLICY_DIR_OUTBOUND,
+					      reason, sr, negotiation_shunt,
 					      &outbound_kernel_policy,
 					      calculate_sa_prio(c, false),
 					      NULL, 0 /* xfrm_if_id */,
@@ -1942,32 +1935,48 @@ static bool setup_half_ipsec_sa(struct state *st, bool inbound)
 		return false;
 	}
 
+	uint64_t sa_ipsec_soft_bytes =  c->config->sa_ipsec_max_bytes;
+	uint64_t sa_ipsec_soft_packets = c->config->sa_ipsec_max_packets;
+
+	if (!LIN(POLICY_DONT_REKEY, c->policy)) {
+		sa_ipsec_soft_bytes = fuzz_soft_limit("ipsec-max-bytes",st->st_sa_role,
+						      c->config->sa_ipsec_max_bytes,
+						      IPSEC_SA_MAX_SOFT_LIMIT_PERCENTAGE,
+						      st->st_logger);
+		sa_ipsec_soft_packets = fuzz_soft_limit("ipsec-max-packets", st->st_sa_role,
+							c->config->sa_ipsec_max_packets,
+							IPSEC_SA_MAX_SOFT_LIMIT_PERCENTAGE,
+							st->st_logger);
+	}
 	const struct kernel_sa said_boilerplate = {
-		.src.address = &kernel_policy.src.host,
-		.dst.address = &kernel_policy.dst.host,
-		.src.client = &kernel_policy.src.route,
-		.dst.client = &kernel_policy.dst.route,
+		.src.address = kernel_policy.src.host,
+		.dst.address = kernel_policy.dst.host,
+		.src.client = kernel_policy.src.route,
+		.dst.client = kernel_policy.dst.route,
 		.inbound = inbound,
 		.tunnel = (kernel_policy.mode == ENCAP_MODE_TUNNEL),
-		.transport_proto = c->spd.this.client.ipproto,
 		.sa_lifetime = c->sa_ipsec_life_seconds,
+		.sa_max_soft_bytes = sa_ipsec_soft_bytes,
+		.sa_max_soft_packets = sa_ipsec_soft_packets,
+		.sa_ipsec_max_bytes = c->config->sa_ipsec_max_bytes,
+		.sa_ipsec_max_packets = c->config->sa_ipsec_max_packets,
 		.sec_label = (st->st_v1_seen_sec_label.len > 0 ? st->st_v1_seen_sec_label :
 			      st->st_v1_acquired_sec_label.len > 0 ? st->st_v1_acquired_sec_label :
 			      c->spd.this.sec_label /* assume connection outlive their kernel_sa's */),
 	};
 
+
+
 	address_buf sab, dab;
 	selector_buf scb, dcb;
-	dbg("kernel: %s() %s %s-%s->[%s=%s=>%s]-%s->%s sec_label="PRI_SHUNK"%s",
+	dbg("kernel: %s() %s %s->[%s=%s=>%s]->%s sec_label="PRI_SHUNK"%s",
 	    __func__,
 	    said_boilerplate.inbound ? "inbound" : "outbound",
-	    str_selector_subnet_port(said_boilerplate.src.client, &scb),
-	    protocol_by_ipproto(said_boilerplate.transport_proto)->name,
-	    str_address(said_boilerplate.src.address, &sab),
+	    str_selector(&said_boilerplate.src.client, &scb),
+	    str_address(&said_boilerplate.src.address, &sab),
 	    encap_mode_name(kernel_policy.mode),
-	    str_address(said_boilerplate.dst.address, &dab),
-	    protocol_by_ipproto(said_boilerplate.transport_proto)->name,
-	    str_selector_subnet_port(said_boilerplate.dst.client, &dcb),
+	    str_address(&said_boilerplate.dst.address, &dab),
+	    str_selector(&said_boilerplate.dst.client, &dcb),
 	    /* see above */
 	    pri_shunk(said_boilerplate.sec_label),
 	    (st->st_v1_seen_sec_label.len > 0 ? " (IKEv1 seen)" :
@@ -1978,11 +1987,11 @@ static bool setup_half_ipsec_sa(struct state *st, bool inbound)
 	/* set up IPCOMP SA, if any */
 
 	if (st->st_ipcomp.present) {
-		ipsec_spi_t ipcomp_spi =
-			inbound ? st->st_ipcomp.our_spi : st->st_ipcomp.attrs.spi;
+		ipsec_spi_t ipcomp_spi = (inbound ? st->st_ipcomp.inbound.spi :
+					  st->st_ipcomp.outbound.spi);
 		*said_next = said_boilerplate;
 		said_next->spi = ipcomp_spi;
-		said_next->esatype = ET_IPCOMP;
+		said_next->proto = &ip_protocol_ipcomp;
 
 		said_next->ipcomp = st->st_ipcomp.attrs.transattrs.ta_ipcomp;
 		said_next->level = said_next - said;
@@ -2001,11 +2010,10 @@ static bool setup_half_ipsec_sa(struct state *st, bool inbound)
 	/* set up ESP SA, if any */
 
 	if (st->st_esp.present) {
-		ipsec_spi_t esp_spi =
-			inbound ? st->st_esp.our_spi : st->st_esp.attrs.spi;
-		uint8_t *esp_dst_keymat =
-			inbound ? st->st_esp.our_keymat : st->st_esp.
-			peer_keymat;
+		ipsec_spi_t esp_spi = (inbound ? st->st_esp.inbound.spi :
+				       st->st_esp.outbound.spi);
+		chunk_t esp_dst_keymat = (inbound ? st->st_esp.inbound.keymat :
+					  st->st_esp.outbound.keymat);
 		const struct trans_attrs *ta = &st->st_esp.attrs.transattrs;
 
 		const struct ip_encap *encap_type = NULL;
@@ -2085,14 +2093,14 @@ static bool setup_half_ipsec_sa(struct state *st, bool inbound)
 
 		size_t integ_keymat_size = ta->ta_integ->integ_keymat_size; /* BYTES */
 
-		dbg("kernel: st->st_esp.keymat_len=%" PRIu16 " is encrypt_keymat_size=%zu + integ_keymat_size=%zu",
-		    st->st_esp.keymat_len, encrypt_keymat_size, integ_keymat_size);
+		dbg("kernel: st->st_esp.keymat_len=%zu is encrypt_keymat_size=%zu + integ_keymat_size=%zu",
+		    esp_dst_keymat.len, encrypt_keymat_size, integ_keymat_size);
 
-		passert(st->st_esp.keymat_len == encrypt_keymat_size + integ_keymat_size);
+		PASSERT(st->st_logger, esp_dst_keymat.len == encrypt_keymat_size + integ_keymat_size);
 
 		*said_next = said_boilerplate;
 		said_next->spi = esp_spi;
-		said_next->esatype = ET_ESP;
+		said_next->proto = &ip_protocol_esp;
 		said_next->replay_window = c->sa_replay_window;
 		dbg("kernel: setting IPsec SA replay-window to %d", c->sa_replay_window);
 
@@ -2152,9 +2160,9 @@ static bool setup_half_ipsec_sa(struct state *st, bool inbound)
 		said_next->encrypt = ta->ta_encrypt;
 
 		/* divide up keying material */
-		said_next->enckey = esp_dst_keymat;
+		said_next->enckey = esp_dst_keymat.ptr;
 		said_next->enckeylen = encrypt_keymat_size; /* BYTES */
-		said_next->authkey = esp_dst_keymat + encrypt_keymat_size;
+		said_next->authkey = esp_dst_keymat.ptr + encrypt_keymat_size;
 		said_next->authkeylen = integ_keymat_size; /* BYTES */
 
 		said_next->level = said_next - said;
@@ -2199,10 +2207,10 @@ static bool setup_half_ipsec_sa(struct state *st, bool inbound)
 	/* set up AH SA, if any */
 
 	if (st->st_ah.present) {
-		ipsec_spi_t ah_spi =
-			inbound ? st->st_ah.our_spi : st->st_ah.attrs.spi;
-		uint8_t *ah_dst_keymat =
-			inbound ? st->st_ah.our_keymat : st->st_ah.peer_keymat;
+		ipsec_spi_t ah_spi = (inbound ? st->st_ah.inbound.spi :
+				      st->st_ah.outbound.spi);
+		chunk_t ah_dst_keymat = (inbound ? st->st_ah.inbound.keymat :
+					 st->st_ah.outbound.keymat);
 
 		const struct integ_desc *integ = st->st_ah.attrs.transattrs.ta_integ;
 		size_t keymat_size = integ->integ_keymat_size;
@@ -2214,14 +2222,14 @@ static bool setup_half_ipsec_sa(struct state *st, bool inbound)
 			goto fail;
 		}
 
-		passert(st->st_ah.keymat_len == keymat_size);
+		PASSERT(st->st_logger, ah_dst_keymat.len == keymat_size);
 
 		*said_next = said_boilerplate;
 		said_next->spi = ah_spi;
-		said_next->esatype = ET_AH;
+		said_next->proto = &ip_protocol_ah;
 		said_next->integ = integ;
-		said_next->authkeylen = st->st_ah.keymat_len;
-		said_next->authkey = ah_dst_keymat;
+		said_next->authkeylen = ah_dst_keymat.len;
+		said_next->authkey = ah_dst_keymat.ptr;
 		said_next->level = said_next - said;
 		said_next->reqid = reqid_ah(c->spd.reqid);
 		said_next->story = said_str(kernel_policy.dst.host,
@@ -2281,7 +2289,8 @@ static bool setup_half_ipsec_sa(struct state *st, bool inbound)
 		struct kernel_policy kernel_policy =
 			kernel_policy_from_state(st, &c->spd,
 						 ENCAP_DIRECTION_INBOUND);
-		if (!raw_policy(KP_ADD_INBOUND,
+		if (!raw_policy(KERNEL_POLICY_OP_ADD,
+				KERNEL_POLICY_DIR_INBOUND,
 				EXPECT_KERNEL_POLICY_OK,
 				&kernel_policy.src.route,	/* src_client */
 				&kernel_policy.dst.route,	/* dst_client */
@@ -2301,8 +2310,6 @@ static bool setup_half_ipsec_sa(struct state *st, bool inbound)
 	/* If there are multiple SPIs, group them. */
 
 	if (kernel_ops->grp_sa != NULL && said_next > &said[1]) {
-		struct kernel_sa *s;
-
 		/*
 		 * group SAs, two at a time, inner to outer (backwards in
 		 * said[])
@@ -2312,7 +2319,7 @@ static bool setup_half_ipsec_sa(struct state *st, bool inbound)
 		 *
 		 * the grouping would be ipip:esp, esp:ah.
 		 */
-		for (s = said; s < said_next - 1; s++) {
+		for (struct kernel_sa *s = said; s < said_next - 1; s++) {
 			dbg("kernel: grouping %s and %s",
 			    s[0].story, s[1].story);
 			if (!kernel_ops->grp_sa(s + 1, s)) {
@@ -2341,8 +2348,8 @@ fail:
 		if (said_next->proto != NULL) {
 			kernel_ops_del_ipsec_spi(said_next->spi,
 						 said_next->proto,
-						 said_next->src.address,
-						 said_next->dst.address,
+						 &said_next->src.address,
+						 &said_next->dst.address,
 						 st->st_logger);
 		}
 	}
@@ -2371,21 +2378,31 @@ static unsigned append_teardown(struct dead_sa *dead, bool inbound,
 				ip_address host_addr, ip_address effective_remote_address)
 {
 	bool present = proto->present;
-	if (!present && inbound && proto->our_spi != 0 && proto->attrs.spi == 0) {
-		dbg("kernel: forcing inbound delete of %s as .our_spi: "PRI_IPSEC_SPI"; attrs.spi: "PRI_IPSEC_SPI,
+	if (!present && inbound && proto->inbound.spi != 0 && proto->outbound.spi == 0) {
+		dbg("kernel: forcing inbound delete of %s as .inbound.spi: "PRI_IPSEC_SPI"; attrs.spi: "PRI_IPSEC_SPI,
 		    proto->protocol->name,
-		    pri_ipsec_spi(proto->our_spi),
-		    pri_ipsec_spi(proto->attrs.spi));
+		    pri_ipsec_spi(proto->inbound.spi),
+		    pri_ipsec_spi(proto->outbound.spi));
 		present = true;
 	}
 	if (present) {
 		dead->protocol = proto->protocol;
 		if (inbound) {
-			dead->spi = proto->our_spi; /* incoming */
+			if (proto->inbound.kernel_sa_expired & SA_HARD_EXPIRED) {
+				dbg("kernel expired SPI 0x%x skip deleting",
+				    ntohl(proto->inbound.spi));
+				return 0;
+			}
+			dead->spi = proto->inbound.spi; /* incoming */
 			dead->src = effective_remote_address;
 			dead->dst = host_addr;
 		} else {
-			dead->spi = proto->attrs.spi; /* outgoing */
+			if (proto->outbound.kernel_sa_expired & SA_HARD_EXPIRED) {
+				dbg("kernel hard expired SPI 0x%x skip deleting",
+				    ntohl(proto->outbound.spi));
+				return 0;
+			}
+			dead->spi = proto->outbound.spi; /* outgoing */
 			dead->src = host_addr;
 			dead->dst = effective_remote_address;
 		}
@@ -2481,9 +2498,6 @@ const struct kernel_ops *const kernel_stacks[] = {
 #endif
 #ifdef KERNEL_PFKEYV2
 	&pfkeyv2_kernel_ops,
-#endif
-#ifdef KERNEL_BSDKAME
-	&bsdkame_kernel_ops,
 #endif
 	NULL,
 };
@@ -2700,13 +2714,14 @@ bool route_and_eroute(struct connection *c,
 		dbg("kernel: we are replacing an eroute");
 		/* if no state provided, then install a shunt for later */
 		if (st == NULL) {
-			eroute_installed = bare_policy_op(KP_REPLACE_OUTBOUND,
+			eroute_installed = bare_policy_op(KERNEL_POLICY_OP_REPLACE,
 							  EXPECT_KERNEL_POLICY_OK,
 							  c, sr, RT_ROUTED_PROSPECTIVE,
 							  "route_and_eroute() replace shunt",
 							  logger);
 		} else {
-			eroute_installed = sag_eroute(st, sr, KP_REPLACE_OUTBOUND,
+			eroute_installed = sag_eroute(st, sr,
+						      KERNEL_POLICY_OP_REPLACE,
 						      "route_and_eroute() replace sag");
 		}
 
@@ -2725,13 +2740,15 @@ bool route_and_eroute(struct connection *c,
 
 		/* if no state provided, then install a shunt for later */
 		if (st == NULL) {
-			eroute_installed = bare_policy_op(KP_ADD_OUTBOUND,
+			eroute_installed = bare_policy_op(KERNEL_POLICY_OP_ADD,
 							  EXPECT_KERNEL_POLICY_OK,
 							  c, sr, RT_ROUTED_PROSPECTIVE,
 							  "route_and_eroute() add",
 							  logger);
 		} else {
-			eroute_installed = sag_eroute(st, sr, KP_ADD_OUTBOUND, "add");
+			eroute_installed = sag_eroute(st, sr,
+						      KERNEL_POLICY_OP_ADD,
+						      "add");
 		}
 	}
 
@@ -2873,7 +2890,8 @@ bool route_and_eroute(struct connection *c,
 				struct kernel_policy outbound_kernel_policy =
 					bare_kernel_policy(&bs->our_client,
 							   &bs->peer_client);
-				if (!raw_policy(KP_REPLACE_OUTBOUND,
+				if (!raw_policy(KERNEL_POLICY_OP_REPLACE,
+						KERNEL_POLICY_DIR_OUTBOUND,
 						EXPECT_KERNEL_POLICY_OK,
 						&outbound_kernel_policy.src.client,
 						&outbound_kernel_policy.dst.client,
@@ -2893,7 +2911,7 @@ bool route_and_eroute(struct connection *c,
 				/* restore ero's former glory */
 				if (esr->eroute_owner == SOS_NOBODY) {
 					/* note: normal or eclipse case */
-					if (!bare_policy_op(KP_REPLACE_OUTBOUND,
+					if (!bare_policy_op(KERNEL_POLICY_OP_REPLACE,
 							    EXPECT_KERNEL_POLICY_OK,
 							    ero, esr, esr->routing,
 							    "route_and_eroute() restore",
@@ -2916,7 +2934,7 @@ bool route_and_eroute(struct connection *c,
 
 					if (ost != NULL) {
 						if (!sag_eroute(ost, esr,
-								KP_REPLACE_OUTBOUND,
+								KERNEL_POLICY_OP_REPLACE,
 								"restore"))
 							llog(RC_LOG, logger,
 							     "sag_eroute() in route_and_eroute() failed restore/replace");
@@ -2925,7 +2943,7 @@ bool route_and_eroute(struct connection *c,
 			} else {
 				/* there was no previous eroute: delete whatever we installed */
 				if (st == NULL) {
-					if (!bare_policy_op(KP_DELETE_OUTBOUND,
+					if (!bare_policy_op(KERNEL_POLICY_OP_DELETE,
 							    EXPECT_KERNEL_POLICY_OK,
 							    c, sr, sr->routing,
 							    "route_and_eroute() delete",
@@ -2935,7 +2953,7 @@ bool route_and_eroute(struct connection *c,
 					}
 				} else {
 					if (!sag_eroute(st, sr,
-							KP_DELETE_OUTBOUND,
+							KERNEL_POLICY_OP_DELETE,
 							"delete")) {
 						llog(RC_LOG, logger,
 							    "sag_eroute() in route_and_eroute() failed in st case for delete");
@@ -3071,7 +3089,8 @@ static void teardown_kernel_policies(enum kernel_policy_op outbound_op,
 				     enum expect_kernel_policy expect_kernel_policy,
 				     struct logger *logger, const char *story)
 {
-	pexpect(outbound_op == KP_DELETE_OUTBOUND || outbound_op == KP_REPLACE_OUTBOUND);
+	pexpect(outbound_op == KERNEL_POLICY_OP_DELETE ||
+		outbound_op == KERNEL_POLICY_OP_REPLACE);
 	/*
 	 * The restored policy uses TRANSPORT mode (the host
 	 * .{src,dst} provides the family but the address isn't used).
@@ -3079,11 +3098,13 @@ static void teardown_kernel_policies(enum kernel_policy_op outbound_op,
 	struct kernel_policy outbound_kernel_policy =
 		bare_kernel_policy(&out->this.client, &out->that.client);
 	if (!raw_policy(outbound_op,
+			KERNEL_POLICY_DIR_OUTBOUND,
 			EXPECT_KERNEL_POLICY_OK,
 			&outbound_kernel_policy.src.client,
 			&outbound_kernel_policy.dst.client,
 			outbound_shunt,
-			(outbound_op == KP_REPLACE_OUTBOUND ? &outbound_kernel_policy : NULL),
+			(outbound_op == KERNEL_POLICY_OP_REPLACE ? &outbound_kernel_policy
+			 : NULL),
 			deltatime(0),
 			calculate_sa_prio(out->connection, false),
 			&out->connection->sa_marks, out->connection->xfrmi,
@@ -3095,7 +3116,9 @@ static void teardown_kernel_policies(enum kernel_policy_op outbound_op,
 	}
 	dbg("kernel: %s() calling raw_policy(delete-inbound), eroute_owner==NOBODY",
 	    __func__);
-	if (!raw_policy(KP_DELETE_INBOUND, expect_kernel_policy,
+	if (!raw_policy(KERNEL_POLICY_OP_DELETE,
+			KERNEL_POLICY_DIR_INBOUND,
+			expect_kernel_policy,
 			&in->that.client, &in->this.client,
 			SHUNT_UNSET,
 			NULL/*no-policy-template as delete*/,
@@ -3180,7 +3203,7 @@ static void teardown_ipsec_sa(struct state *st, enum expect_kernel_policy expect
 			 */
 			pexpect(esr->routing == RT_ROUTED_ECLIPSED);
 			set_spd_routing(esr, RT_ROUTED_PROSPECTIVE);
-			teardown_kernel_policies(KP_REPLACE_OUTBOUND,
+			teardown_kernel_policies(KERNEL_POLICY_OP_REPLACE,
 						 esr->connection->config->prospective_shunt,
 						 esr, sr, expect_kernel_policy,
 						 st->st_logger,
@@ -3208,7 +3231,7 @@ static void teardown_ipsec_sa(struct state *st, enum expect_kernel_policy expect
 			 * alive (due to an ISAKMP SA), we get rid of
 			 * routing.
 			 */
-			teardown_kernel_policies(KP_DELETE_OUTBOUND,
+			teardown_kernel_policies(KERNEL_POLICY_OP_DELETE,
 						 sr->connection->config->failure_shunt/*delete so almost ignored!?!*/,
 						 sr, sr, expect_kernel_policy,
 						 st->st_logger,
@@ -3248,7 +3271,7 @@ static void teardown_ipsec_sa(struct state *st, enum expect_kernel_policy expect
 							  sr->connection->config->prospective_shunt :
 							  sr->connection->config->failure_shunt);
 			pexpect(shunt_policy != SHUNT_NONE);
-			teardown_kernel_policies(KP_REPLACE_OUTBOUND,
+			teardown_kernel_policies(KERNEL_POLICY_OP_REPLACE,
 						 shunt_policy,
 						 sr, sr, expect_kernel_policy,
 						 st->st_logger,
@@ -3308,6 +3331,31 @@ bool was_eroute_idle(struct state *st, deltatime_t since_when)
 	return deltatime_cmp(idle_time, >=, since_when);
 }
 
+static void set_sa_info(struct ipsec_proto_info *p2, uint64_t bytes,
+			 uint64_t add_time, bool inbound, deltatime_t *ago)
+{
+	if (p2->add_time == 0 && add_time != 0)
+		p2->add_time = add_time; /* this should happen exactly once */
+
+	pexpect(p2->add_time == add_time);
+
+	if (inbound) {
+		if (bytes > p2->inbound.bytes) {
+			p2->inbound.bytes = bytes;
+			p2->inbound.last_used = mononow();
+		}
+		if (ago != NULL)
+			*ago = monotimediff(mononow(), p2->inbound.last_used);
+	} else {
+		if (bytes > p2->outbound.bytes) {
+			p2->outbound.bytes = bytes;
+			p2->outbound.last_used = mononow();
+		}
+		if (ago != NULL)
+			*ago = monotimediff(mononow(), p2->outbound.last_used);
+	}
+}
+
 /*
  * get information about a given SA bundle
  *
@@ -3340,6 +3388,20 @@ bool get_sa_bundle_info(struct state *st, bool inbound, monotime_t *last_contact
 		return false;
 	}
 
+	if (inbound) {
+		if (pi->inbound.kernel_sa_expired & SA_HARD_EXPIRED) {
+			dbg("kernel expired inbound SA SPI "PRI_IPSEC_SPI" skip get_sa_info()",
+			    pri_ipsec_spi(pi->inbound.spi));
+			return true; /* all is well use the last known info */
+		}
+	} else {
+		if (pi->outbound.kernel_sa_expired & SA_HARD_EXPIRED) {
+			dbg("kernel expired outbound SA SPI "PRI_IPSEC_SPI" get_sa_info()",
+			    pri_ipsec_spi(pi->outbound.spi));
+			return true; /* all is well use last known info */
+		}
+	}
+
 	/*
 	 * If we were redirected (using the REDIRECT mechanism),
 	 * change remote->host.addr temporarily, we reset it back
@@ -3357,16 +3419,16 @@ bool get_sa_bundle_info(struct state *st, bool inbound, monotime_t *last_contact
 		c->spd.that.host->port = endpoint_hport(st->st_remote_endpoint);
 	}
 
-	const ip_address *src, *dst;
+	ip_address src, dst;
 	ipsec_spi_t spi;
 	if (inbound) {
-		src = &c->remote->host.addr;
-		dst = &c->local->host.addr;
-		spi = pi->our_spi;
+		src = c->remote->host.addr;
+		dst = c->local->host.addr;
+		spi = pi->inbound.spi;
 	} else {
-		src = &c->local->host.addr;
-		dst = &c->remote->host.addr;
-		spi = pi->attrs.spi;
+		src = c->local->host.addr;
+		dst = c->remote->host.addr;
+		spi = pi->outbound.spi;
 	}
 
 	said_buf sb;
@@ -3375,25 +3437,24 @@ bool get_sa_bundle_info(struct state *st, bool inbound, monotime_t *last_contact
 		.proto = proto,
 		.src.address = src,
 		.dst.address = dst,
-		.story = said_str(*dst, proto, spi, &sb),
+		.story = said_str(dst, proto, spi, &sb),
 	};
 
 	dbg("kernel: get_sa_bundle_info %s", sa.story);
 
 	uint64_t bytes;
 	uint64_t add_time;
-
 	if (!kernel_ops->get_sa(&sa, &bytes, &add_time, st->st_logger))
 		return false;
 
 	pi->add_time = add_time;
 
 	/* field has been set? */
-	passert(!is_monotime_epoch(pi->our_lastused));
-	passert(!is_monotime_epoch(pi->peer_lastused));
+	passert(!is_monotime_epoch(pi->inbound.last_used));
+	passert(!is_monotime_epoch(pi->outbound.last_used));
 
-	uint64_t *pb = inbound ? &pi->our_bytes : &pi->peer_bytes;
-	monotime_t *plu = inbound ? &pi->our_lastused : &pi->peer_lastused;
+	uint64_t *pb = inbound ? &pi->inbound.bytes : &pi->outbound.bytes;
+	monotime_t *plu = inbound ? &pi->inbound.last_used : &pi->outbound.last_used;
 
 	if (bytes > *pb) {
 		*pb = bytes;
@@ -3517,7 +3578,8 @@ bool orphan_holdpass(const struct connection *c, struct spd_route *sr,
 
 			struct kernel_policy outbound_kernel_policy =
 				bare_kernel_policy(&src, &dst);
-			bool ok = raw_policy(KP_REPLACE_OUTBOUND,
+			bool ok = raw_policy(KERNEL_POLICY_OP_REPLACE,
+					     KERNEL_POLICY_DIR_OUTBOUND,
 					     EXPECT_KERNEL_POLICY_OK,
 					     &outbound_kernel_policy.src.client,
 					     &outbound_kernel_policy.dst.client,
@@ -3605,7 +3667,7 @@ static void expire_bare_shunts(struct logger *logger)
 				 */
 				struct connection *c = connection_by_serialno(bsp->from_serialno);
 				if (c != NULL) {
-					if (!bare_policy_op(KP_ADD_OUTBOUND,
+					if (!bare_policy_op(KERNEL_POLICY_OP_ADD,
 							    EXPECT_KERNEL_POLICY_OK,
 							    c, &c->spd,
 							    RT_ROUTED_PROSPECTIVE,
@@ -3654,4 +3716,97 @@ void shutdown_kernel(struct logger *logger)
 		kernel_ops->shutdown(logger);
 	}
 	delete_bare_shunts(logger);
+}
+
+void handle_sa_expire(ipsec_spi_t spi, uint8_t protoid, ip_address *dst,
+		       bool hard, uint64_t bytes, uint64_t packets, uint64_t add_time)
+{
+	struct child_sa *child = find_v2_child_sa_by_spi(spi, protoid, dst);
+
+	if (child == NULL) {
+		address_buf a;
+		dbg("received kernel %s EXPIRE event for IPsec SPI 0x%x, but there is no connection with this SPI and dst %s bytes %" PRIu64 " packets %" PRIu64,
+		     hard ? "hard" : "soft",
+		     ntohl(spi), str_address(dst, &a), bytes, packets);
+		return;
+	}
+
+	const struct connection *c = child->sa.st_connection;
+
+	if ((hard && impair.ignore_hard_expire) ||
+	    (!hard && impair.ignore_soft_expire)) {
+		address_buf a;
+		llog_sa(RC_LOG, child,
+			"IMPAIR: suppressing a %s EXPIRE event spi 0x%x dst %s bytes %" PRIu64 " packets %" PRIu64,
+			hard ? "hard" : "soft", ntohl(spi), str_address(dst, &a),
+			bytes, packets);
+		return;
+	}
+
+	bool rekey = !LIN(POLICY_DONT_REKEY, c->policy);
+	bool newest = c->newest_ipsec_sa == child->sa.st_serialno;
+	struct state *st =  &child->sa;
+	struct ipsec_proto_info *pr = (st->st_esp.present ? &st->st_esp :
+				       st->st_ah.present ? &st->st_ah :
+				       st->st_ipcomp.present ? &st->st_ipcomp :
+				       NULL);
+
+	bool already_softexpired = ((pr->inbound.kernel_sa_expired & SA_SOFT_EXPIRED) ||
+				    (pr->outbound.kernel_sa_expired & SA_SOFT_EXPIRED));
+
+	bool already_hardexpired = ((pr->inbound.kernel_sa_expired & SA_HARD_EXPIRED) ||
+				    (pr->outbound.kernel_sa_expired & SA_HARD_EXPIRED));
+
+	enum sa_expire_kind expire = hard ? SA_HARD_EXPIRED : SA_SOFT_EXPIRED;
+
+	/*
+	 * OUR_SPI was sent by us to our peer, so that our peer can
+	 * include it in all inbound IPsec messages.
+	 */
+	const bool inbound = (pr->inbound.spi == spi);
+
+	llog_sa(RC_LOG, child,
+		"received %s EXPIRE for %s SPI "PRI_IPSEC_SPI" bytes %" PRIu64 " packets %" PRIu64 " rekey=%s%s%s%s%s",
+		hard ? "hard" : "soft",
+		(inbound ? "inbound" : "outbound"), pri_ipsec_spi(spi),
+		bytes, packets,
+		rekey ?  "yes" : "no",
+		already_softexpired ? "; already soft expired" : "",
+		already_hardexpired ? "; already hard expired" : "",
+		(newest ? "" : "; deleting old SA"),
+		(newest && rekey && !already_softexpired && !already_hardexpired) ? "; replacing" : "");
+
+	if ((already_softexpired && expire == SA_SOFT_EXPIRED)  ||
+	    (already_hardexpired && expire == SA_HARD_EXPIRED)) {
+		dbg("#%lu one of the SA has already expired ignore this %s EXPIRE",
+		    child->sa.st_serialno, hard ? "hard" : "soft");
+		/*
+		 * likely the other direction SA EXPIRED, it triggered a rekey first.
+		 * It should be safe to ignore the second one. No need to log.
+		 */
+	} else if (!already_hardexpired && expire == SA_HARD_EXPIRED) {
+		if (inbound) {
+			pr->inbound.kernel_sa_expired |= expire;
+			set_sa_info(pr, bytes, add_time, true /* inbound */, NULL);
+		} else {
+			pr->outbound.kernel_sa_expired |= expire;
+			set_sa_info(pr, bytes, add_time, false /* outbound */, NULL);
+		}
+		set_sa_expire_next_event(EVENT_SA_EXPIRE, &child->sa);
+	} else if (newest && rekey && !already_hardexpired && !already_softexpired && expire == SA_SOFT_EXPIRED) {
+		if (inbound) {
+			pr->inbound.kernel_sa_expired |= expire;
+			set_sa_info(pr, bytes, add_time, true /* inbound */, NULL);
+		} else {
+			pr->outbound.kernel_sa_expired |= expire;
+			set_sa_info(pr, bytes, add_time, false /* outbound */, NULL);
+		}
+		set_sa_expire_next_event(EVENT_NULL/*either v2 REKEY or v1 REPLACE*/, &child->sa);
+	} else {
+		/*
+		 * 'if' and multiple 'else if's are using multiple variables.
+		 * I may have overlooked some cases. lets break hard on unexpected cases.
+		 */
+		passert(1); /* lets break! */
+	}
 }

@@ -297,7 +297,6 @@ bool emit_local_v2AUTH(struct ike_sa *ike,
 
 	case IKEv2_AUTH_DIGSIG:
 	{
-		diag_t d;
 		/* saved during signing */
 		const struct hash_desc *hash_alg = ike->sa.st_v2_digsig.hash;
 		const struct pubkey_signer *signer = ike->sa.st_v2_digsig.signer;
@@ -306,17 +305,13 @@ bool emit_local_v2AUTH(struct ike_sa *ike,
 			return false;
 		}
 
-		d = pbs_out_hunk(&auth_pbs, b, "OID of ASN.1 Algorithm Identifier");
-		if (d != NULL) {
-			llog_diag(RC_LOG_SERIOUS, outs->outs_logger, &d,
-				  "DigSig: failed to emit OID of ASN.1 Algorithm Identifier");
+		if (!pbs_out_hunk(&auth_pbs, b, "OID of ASN.1 Algorithm Identifier")) {
+			/* already logged */
 			return false;
 		}
 
-		d = pbs_out_hunk(&auth_pbs, *auth_sig, "signature");
-		if (d != NULL) {
-			llog_diag(RC_LOG_SERIOUS, outs->outs_logger, &d,
-				  "DigSig: failed to emit HASH");
+		if (!pbs_out_hunk(&auth_pbs, *auth_sig, "signature")) {
+			/* already logged */
 			return false;
 		}
 		break;
@@ -358,7 +353,8 @@ static diag_t verify_v2AUTH_and_log_using_pubkey(struct authby authby,
 						 const struct crypt_mac *idhash,
 						 const struct pbs_in *signature_pbs,
 						 const struct hash_desc *hash_algo,
-						 const struct pubkey_signer *pubkey_signer)
+						 const struct pubkey_signer *pubkey_signer,
+						 const char *signature_payload_name)
 {
 	statetime_t start = statetime_start(&ike->sa);
 
@@ -404,7 +400,8 @@ static diag_t verify_v2AUTH_and_log_using_pubkey(struct authby authby,
 	struct crypt_mac hash = v2_calculate_sighash(ike, idhash, hash_algo,
 						     REMOTE_PERSPECTIVE);
 	diag_t d = authsig_and_log_using_pubkey(ike, &hash, signature,
-						hash_algo, pubkey_signer);
+						hash_algo, pubkey_signer,
+						signature_payload_name);
 	statetime_stop(&start, "%s()", __func__);
 	return d;
 }
@@ -431,27 +428,31 @@ diag_t verify_v2AUTH_and_log(enum ikev2_auth_method recv_auth,
 							  ike, idhash_in,
 							  signature_pbs,
 							  &ike_alg_hash_sha1,
-							  &pubkey_signer_pkcs1_1_5_rsa);
+							  &pubkey_signer_raw_pkcs1_1_5_rsa,
+							  NULL/*legacy-signature-name*/);
 
 	case IKEv2_AUTH_ECDSA_SHA2_256_P256:
 		return verify_v2AUTH_and_log_using_pubkey((struct authby) { .ecdsa = true, },
 							  ike, idhash_in,
 							  signature_pbs,
 							  &ike_alg_hash_sha2_256,
-							  &pubkey_signer_ecdsa/*_p256*/);
+							  &pubkey_signer_raw_ecdsa/*_p256*/,
+							  NULL/*legacy-signature-name*/);
 
 	case IKEv2_AUTH_ECDSA_SHA2_384_P384:
 		return verify_v2AUTH_and_log_using_pubkey((struct authby) { .ecdsa = true, },
 							  ike, idhash_in,
 							  signature_pbs,
 							  &ike_alg_hash_sha2_384,
-							  &pubkey_signer_ecdsa/*_p384*/);
+							  &pubkey_signer_raw_ecdsa/*_p384*/,
+							  NULL/*legacy-signature-name*/);
 	case IKEv2_AUTH_ECDSA_SHA2_512_P521:
 		return verify_v2AUTH_and_log_using_pubkey((struct authby) { .ecdsa = true, },
 							  ike, idhash_in,
 							  signature_pbs,
 							  &ike_alg_hash_sha2_512,
-							  &pubkey_signer_ecdsa/*_p521*/);
+							  &pubkey_signer_raw_ecdsa/*_p521*/,
+							  NULL/*legacy-signature-name*/);
 
 	case IKEv2_AUTH_PSK:
 	{
@@ -528,9 +529,9 @@ diag_t verify_v2AUTH_and_log(enum ikev2_auth_method recv_auth,
 				const struct pubkey_signer *signer;
 				struct authby authby;
 			} signers[] = {
-				{ &pubkey_signer_ecdsa, { .ecdsa = true, }, },
-				{ &pubkey_signer_rsassa_pss, { .rsasig = true, }, },
-				{ &pubkey_signer_pkcs1_1_5_rsa, { .rsasig_v1_5 = true, }, }
+				{ &pubkey_signer_digsig_ecdsa, { .ecdsa = true, }, },
+				{ &pubkey_signer_digsig_rsassa_pss, { .rsasig = true, }, },
+				{ &pubkey_signer_digsig_pkcs1_1_5_rsa, { .rsasig_v1_5 = true, }, }
 			};
 
 			FOR_EACH_ELEMENT(s, signers) {
@@ -571,7 +572,8 @@ diag_t verify_v2AUTH_and_log(enum ikev2_auth_method recv_auth,
 									  ike, idhash_in,
 									  signature_pbs,
 									  (*hash),
-									  s->signer);
+									  s->signer,
+									  "digital signature");
 			}
 		}
 

@@ -25,6 +25,30 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+#ifdef HAVE_LABELED_IPSEC
+/*
+ * GRRR:
+ *
+ * GLIBC/Linux and MUSL/Linux define sockaddr_in et.al. in
+ * <netinet/in.h>, and the generic network code uses this.
+ * Unfortunately (cough) the Linux kernel headers also provide
+ * definitions of those structures in <linux/in.h> et.al. which,
+ * depending on header include order can result in conflicting
+ * definitions.  For instance, if sockaddr_in is not defined,
+ * <linux/xfrm.h> will include the definition in <linux/in.h> but that
+ * will then clash with a later include of <netinet/in.h>.
+ *
+ * GLIBC/Linux has hacks on hacks to work-around this, not MUSL.
+ * Fortunately, including <netinet/in.h> first will force the Linux
+ * kernel headers to use that definition.
+ *
+ * XXX: on the one hand, this labeled ipsec code should be moved to
+ * its own file, but on the other hand this is IKEv1.
+ */
+#include <netinet/in.h>
+#include "linux/xfrm.h" /* local (if configured) or system copy; for XFRM_SC_DOI_LSM and XFRM_SC_ALG_SELINUX */
+#endif
+
 #include "sysdep.h"
 #include "constants.h"
 
@@ -69,7 +93,7 @@ static bool parse_secctx_attr(pb_stream *pbs UNUSED, struct state *st)
 }
 #else
 #include "ikev1_labeled_ipsec.h"
-#include <linux/xfrm.h> /* for XFRM_SC_DOI_LSM and XFRM_SC_ALG_SELINUX */
+
 static bool parse_secctx_attr(struct pbs_in *pbs, struct state *st)
 {
 	const struct connection *c = st->st_connection;
@@ -1026,14 +1050,6 @@ bool ikev1_out_sa(pb_stream *outs,
 			pb_stream proposal_pbs;
 
 			/*
-			 * set the tunnel_mode bit on the last proposal only, and
-			 * only if we are trying to negotiate tunnel mode in the first
-			 * place.
-			 */
-			const bool tunnel_mode = (valid_prop_cnt == 1) &&
-				      (st->st_policy & POLICY_TUNNEL);
-
-			/*
 			 * pick the part of the proposal we are trying to work on
 			 */
 
@@ -1104,7 +1120,7 @@ bool ikev1_out_sa(pb_stream *outs,
 					attr_desc =
 						&isakmp_ipsec_attribute_desc;
 					attr_val_descs = ipsec_attr_val_descs;
-					spi_ptr = &st->st_ah.our_spi;
+					spi_ptr = &st->st_ah.inbound.spi;
 					spi_generated = &ah_spi_generated;
 					proto = &ip_protocol_ah;
 					break;
@@ -1116,7 +1132,7 @@ bool ikev1_out_sa(pb_stream *outs,
 					attr_desc =
 						&isakmp_ipsec_attribute_desc;
 					attr_val_descs = ipsec_attr_val_descs;
-					spi_ptr = &st->st_esp.our_spi;
+					spi_ptr = &st->st_esp.inbound.spi;
 					spi_generated = &esp_spi_generated;
 					proto = &ip_protocol_esp;
 					break;
@@ -1134,11 +1150,10 @@ bool ikev1_out_sa(pb_stream *outs,
 					 * so we use specialized code to emit it.
 					 */
 					if (!ipcomp_cpi_generated) {
-						st->st_ipcomp.our_spi =
-							get_my_cpi(&c->spd,
-								   tunnel_mode,
-								   st->st_logger);
-						if (st->st_ipcomp.our_spi == 0)
+						st->st_ipcomp.inbound.spi =
+							get_ipsec_cpi(&c->spd,
+								      st->st_logger);
+						if (st->st_ipcomp.inbound.spi == 0)
 							goto fail; /* problem generating CPI */
 
 						ipcomp_cpi_generated = true;
@@ -1147,7 +1162,7 @@ bool ikev1_out_sa(pb_stream *outs,
 					 * CPI is stored in network low order end of an
 					 * ipsec_spi_t.  So we start a couple of bytes in.
 					 */
-					if (!out_raw((uint8_t *)&st->st_ipcomp.our_spi +
+					if (!out_raw((uint8_t *)&st->st_ipcomp.inbound.spi +
 						     IPSEC_DOI_SPI_SIZE -
 						     IPCOMP_CPI_SIZE,
 						     IPCOMP_CPI_SIZE,
@@ -1161,10 +1176,8 @@ bool ikev1_out_sa(pb_stream *outs,
 
 				if (spi_ptr != NULL) {
 					if (!*spi_generated) {
-						*spi_ptr = get_ipsec_spi(0,
-									 proto,
+						*spi_ptr = get_ipsec_spi(0, proto,
 									 &c->spd,
-									 tunnel_mode,
 									 st->st_logger);
 						*spi_generated = true;
 					}
@@ -2070,7 +2083,7 @@ rsasig_common:
 					ta.life_seconds = deltatime(val);
 					break;
 				case OAKLEY_LIFE_KILOBYTES:
-					ta.life_kilobytes = val;
+					dbg("ignoring OAKLEY_LIFE_KILOBYTES=%"PRIu32, val);
 					break;
 				default:
 					bad_case(life_type);
@@ -2311,7 +2324,6 @@ bool init_aggr_st_oakley(struct ike_sa *ike)
 	struct trans_attrs ta = {
 		/* When this SA expires (seconds) */
 		.life_seconds = c->sa_ike_life_seconds,
-		.life_kilobytes = 1000000,
 		.ta_encrypt = ikev1_get_ike_encrypt_desc(enc->val)
 	};
 
@@ -2423,9 +2435,7 @@ static bool parse_ipsec_transform(struct isakmp_transform *trans,
 	}
 
 	*attrs = (struct ipsec_trans_attrs) {
-		.spi = 0,                                               /* spi */
 		.life_seconds = DELTATIME_INIT(IPSEC_SA_LIFETIME_DEFAULT),	/* life_seconds */
-		.life_kilobytes = SA_LIFE_DURATION_K_DEFAULT,           /* life_kilobytes */
 		.mode = ENCAPSULATION_MODE_UNSPECIFIED,        /* encapsulation */
 	};
 
@@ -2483,7 +2493,7 @@ static bool parse_ipsec_transform(struct isakmp_transform *trans,
 			}
 
 			seen_attrs |= LELEM(ty);
-			passert(ty < ipsec_attr_val_descs_roof);
+			passert(ty < IPSEC_ATTR_VAL_DESCS_ROOF);
 			vdesc = ipsec_attr_val_descs[ty];
 		}
 
@@ -2569,7 +2579,7 @@ static bool parse_ipsec_transform(struct isakmp_transform *trans,
 				break;
 			}
 			case SA_LIFE_TYPE_KBYTES:
-				attrs->life_kilobytes = val;
+				dbg("ignoring SA_LIFE_TYPE_KBYTES=%"PRIu32, val);
 				break;
 			default:
 				bad_case(life_type);
@@ -2805,7 +2815,6 @@ static void echo_proposal(struct isakmp_proposal r_proposal,    /* proposal to e
 			  struct_desc *trans_desc,              /* descriptor for this transformation */
 			  pb_stream *trans_pbs,                 /* PBS for incoming transform */
 			  const struct spd_route *sr,           /* host details for the association */
-			  bool tunnel_mode,                     /* true for inner most tunnel SA */
 			  struct logger *logger)
 {
 	pb_stream r_proposal_pbs;
@@ -2824,20 +2833,18 @@ static void echo_proposal(struct isakmp_proposal r_proposal,    /* proposal to e
 		 * Note: we may fail to generate a satisfactory CPI,
 		 * but we'll ignore that.
 		 */
-		pi->our_spi = get_my_cpi(sr, tunnel_mode, logger);
-		passert(out_raw((uint8_t *) &pi->our_spi +
+		pi->inbound.spi = get_ipsec_cpi(sr, logger);
+		passert(out_raw((uint8_t *) &pi->inbound.spi +
 				IPSEC_DOI_SPI_SIZE - IPCOMP_CPI_SIZE,
 				IPCOMP_CPI_SIZE,
 				&r_proposal_pbs, "CPI"));
 	} else {
-		pi->our_spi = get_ipsec_spi(pi->attrs.spi,
-					    r_proposal.isap_protoid == PROTO_IPSEC_AH ?
+		pi->inbound.spi = get_ipsec_spi(pi->outbound.spi,
+						r_proposal.isap_protoid == PROTO_IPSEC_AH ?
 						&ip_protocol_ah : &ip_protocol_esp,
-					    sr,
-					    tunnel_mode,
-					    logger);
+						sr, logger);
 		/* XXX should check for errors */
-		passert(out_raw((uint8_t *) &pi->our_spi, IPSEC_DOI_SPI_SIZE,
+		passert(out_raw((uint8_t *) &pi->inbound.spi, IPSEC_DOI_SPI_SIZE,
 				&r_proposal_pbs, "SPI"));
 	}
 
@@ -2918,44 +2925,29 @@ v1_notification_t parse_ipsec_sa_body(struct pbs_in *sa_pbs,           /* body o
 	/* for each conjunction of proposals... */
 	while (next_full) {
 		int propno = next_proposal.isap_proposal;
-		pb_stream
-			ah_prop_pbs,
-			esp_prop_pbs,
-			ipcomp_prop_pbs;
-		struct isakmp_proposal
-			ah_proposal,
-			esp_proposal,
-			ipcomp_proposal;
-		ipsec_spi_t
-			ah_spi = 0,
-			esp_spi = 0,
-			ipcomp_cpi = 0;
-		bool
-			ah_seen = false,
-			esp_seen = false,
-			ipcomp_seen = false;
-		const ip_protocol *inner_proto = NULL;
-		bool tunnel_mode = false;
+
+		struct pbs_in ah_prop_pbs;
+		struct pbs_in esp_prop_pbs;
+		struct pbs_in ipcomp_prop_pbs;
+
+		struct isakmp_proposal ah_proposal = {0};
+		struct isakmp_proposal esp_proposal = {0};
+		struct isakmp_proposal ipcomp_proposal = {0};
+
+		ipsec_spi_t ah_spi = 0;
+		ipsec_spi_t esp_spi = 0;
+		ipsec_spi_t ipcomp_cpi = 0;
+
+		bool ah_seen = false;
+		bool esp_seen = false;
+		bool ipcomp_seen = false;
+
 		const struct ipcomp_desc *well_known_cpi = NULL;
 
-		pb_stream
-			ah_trans_pbs,
-			esp_trans_pbs,
-			ipcomp_trans_pbs;
-		struct isakmp_transform
-			ah_trans,
-			esp_trans,
-			ipcomp_trans;
-		struct ipsec_trans_attrs
-			ah_attrs,
-			esp_attrs,
-			ipcomp_attrs;
+		/*
+		 * For each proposal in the conjunction.
+		 */
 
-		zero(&ah_proposal);	/* OK: no pointer fields */
-		zero(&esp_proposal);	/* OK: no pointer fields */
-		zero(&ipcomp_proposal);	/* OK: no pointer fields */
-
-		/* for each proposal in the conjunction */
 		do {
 			if (next_proposal.isap_protoid == PROTO_IPCOMP) {
 				/* IPCOMP CPI */
@@ -3139,15 +3131,33 @@ v1_notification_t parse_ipsec_sa_body(struct pbs_in *sa_pbs,           /* body o
 			}
 		} while (next_proposal.isap_proposal == propno);
 
-		/* Now that we have all conjuncts, we should try
-		 * the Cartesian product of each's transforms!
-		 * At the moment, we take short-cuts on account of
-		 * our rudimentary hard-wired policy.
-		 * For now, we find an acceptable AH (if any)
-		 * and then an acceptable ESP.  The only interaction
-		 * is that the ESP acceptance can know whether there
-		 * was an acceptable AH and hence not require an AUTH.
+		/*
+		 * Now that we have all conjuncts, we should try the
+		 * Cartesian product of each's transforms!
+		 *
+		 * At the moment, we take short-cuts on account of our
+		 * rudimentary hard-wired policy.  For now, we find an
+		 * acceptable AH (if any) and then an acceptable ESP.
+		 * The only interaction is that the ESP acceptance can
+		 * know whether there was an acceptable AH and hence
+		 * not require an AUTH.
 		 */
+
+		struct ipsec_trans_attrs ah_attrs;
+		struct ipsec_trans_attrs esp_attrs;
+		struct ipsec_trans_attrs ipcomp_attrs;
+
+		struct pbs_in ah_trans_pbs;
+		struct pbs_in esp_trans_pbs;
+		struct pbs_in ipcomp_trans_pbs;
+
+		struct isakmp_transform ah_trans;
+		struct isakmp_transform esp_trans;
+		struct isakmp_transform ipcomp_trans;
+
+		ipsec_spi_t ah_attrs_spi = 0;
+		ipsec_spi_t esp_attrs_spi = 0;
+		ipsec_spi_t ipcomp_attrs_cpi = 0;
 
 		if (ah_seen) {
 			int previous_transnum = -1;
@@ -3211,10 +3221,7 @@ v1_notification_t parse_ipsec_sa_body(struct pbs_in *sa_pbs,           /* body o
 			if (!ikev1_verify_ah(c, &ah_attrs.transattrs, st->st_logger)) {
 				continue;
 			}
-			ah_attrs.spi = ah_spi;
-			inner_proto = &ip_protocol_ah;
-			if (ah_attrs.mode == ENCAPSULATION_MODE_TUNNEL)
-				tunnel_mode = true;
+			ah_attrs_spi = ah_spi;
 		}
 
 		if (esp_seen) {
@@ -3273,10 +3280,7 @@ v1_notification_t parse_ipsec_sa_body(struct pbs_in *sa_pbs,           /* body o
 			if (tn == esp_proposal.isap_notrans)
 				continue; /* we didn't find a nice one */
 
-			esp_attrs.spi = esp_spi;
-			inner_proto = &ip_protocol_esp;
-			if (esp_attrs.mode == ENCAPSULATION_MODE_TUNNEL)
-				tunnel_mode = true;
+			esp_attrs_spi = esp_spi;
 		} else if (st->st_policy & POLICY_ENCRYPT) {
 			connection_buf cib;
 			address_buf b;
@@ -3369,10 +3373,7 @@ v1_notification_t parse_ipsec_sa_body(struct pbs_in *sa_pbs,           /* body o
 			if (tn == ipcomp_proposal.isap_notrans)
 				continue; /* we didn't find a nice one */
 
-			ipcomp_attrs.spi = ipcomp_cpi;
-			inner_proto = &ip_protocol_ipcomp;
-			if (ipcomp_attrs.mode == ENCAPSULATION_MODE_TUNNEL)
-				tunnel_mode = true;
+			ipcomp_attrs_cpi = ipcomp_cpi;
 		}
 
 		/* Eureka: we liked what we saw -- accept it. */
@@ -3394,8 +3395,6 @@ v1_notification_t parse_ipsec_sa_body(struct pbs_in *sa_pbs,           /* body o
 					      &isakmp_ah_transform_desc,
 					      &ah_trans_pbs,
 					      &c->spd,
-						tunnel_mode &&
-					      inner_proto == &ip_protocol_ah,
 					      st->st_logger);
 			}
 
@@ -3409,8 +3408,6 @@ v1_notification_t parse_ipsec_sa_body(struct pbs_in *sa_pbs,           /* body o
 					      &isakmp_esp_transform_desc,
 					      &esp_trans_pbs,
 					      &c->spd,
-					      tunnel_mode &&
-						inner_proto == &ip_protocol_esp,
 					      st->st_logger);
 			}
 
@@ -3424,8 +3421,6 @@ v1_notification_t parse_ipsec_sa_body(struct pbs_in *sa_pbs,           /* body o
 					      &isakmp_ipcomp_transform_desc,
 					      &ipcomp_trans_pbs,
 					      &c->spd,
-					      tunnel_mode &&
-						inner_proto == &ip_protocol_ipcomp,
 					      st->st_logger);
 			}
 
@@ -3434,25 +3429,30 @@ v1_notification_t parse_ipsec_sa_body(struct pbs_in *sa_pbs,           /* body o
 
 		/* save decoded version of winning SA in state */
 
+		const monotime_t now = mononow();
+
 		st->st_ah.present = ah_seen;
 		if (ah_seen) {
 			st->st_ah.attrs = ah_attrs;
-			st->st_ah.our_lastused = mononow();
-			st->st_ah.peer_lastused = mononow();
+			st->st_ah.outbound.spi = ah_attrs_spi;
+			st->st_ah.inbound.last_used = now;
+			st->st_ah.outbound.last_used = now;
 		}
 
 		st->st_esp.present = esp_seen;
 		if (esp_seen) {
 			st->st_esp.attrs = esp_attrs;
-			st->st_esp.our_lastused = mononow();
-			st->st_esp.peer_lastused = mononow();
+			st->st_esp.outbound.spi = esp_attrs_spi;
+			st->st_esp.inbound.last_used = now;
+			st->st_esp.outbound.last_used = now;
 		}
 
 		st->st_ipcomp.present = ipcomp_seen;
 		if (ipcomp_seen) {
 			st->st_ipcomp.attrs = ipcomp_attrs;
-			st->st_ipcomp.our_lastused = mononow();
-			st->st_ipcomp.peer_lastused = mononow();
+			st->st_ipcomp.outbound.spi = ipcomp_attrs_cpi;
+			st->st_ipcomp.inbound.last_used = now;
+			st->st_ipcomp.outbound.last_used = now;
 		}
 
 		return v1N_NOTHING_WRONG;	/* accept this transform! */
