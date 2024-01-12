@@ -27,6 +27,7 @@
  */
 
 bool raw_policy(enum kernel_policy_op op,
+		enum kernel_policy_dir dir,
 		enum expect_kernel_policy expect_kernel_policy,
 		const ip_selector *src_client,
 		const ip_selector *dst_client,
@@ -46,10 +47,19 @@ bool raw_policy(enum kernel_policy_op op,
 	LSWDBGP(DBG_BASE, buf) {
 
 		jam(buf, "kernel: %s() ", __func__);
+
 		jam_enum_short(buf, &kernel_policy_op_names, op);
+		jam_string(buf, "+");
+		jam_enum_short(buf, &kernel_policy_dir_names, dir);
+
 		if (kernel_policy != NULL &&
 		    kernel_policy->nr_rules > 0 &&
-		    (op == KP_DELETE_OUTBOUND || op == KP_DELETE_INBOUND)) {
+		    op == KERNEL_POLICY_OP_DELETE) {
+			/*
+			 * XXX: when deleting a kernel policy, why
+			 * include encapsulation information?  Is it
+			 * used?
+			 */
 			jam(buf, ",ENCAP!=NULL");
 		}
 
@@ -120,17 +130,19 @@ bool raw_policy(enum kernel_policy_op op,
 		dbg("kernel: %s() SPI_HOLD implemented as no-op", __func__);
 		return true;
 	case SHUNT_TRAP:
-		if (op == KP_ADD_INBOUND ||
-		    op == KP_DELETE_INBOUND) {
-			dbg("kernel: %s() SPI_TRAP inbound implemented as no-op", __func__);
+		if ((op == KERNEL_POLICY_OP_ADD && dir == KERNEL_POLICY_DIR_INBOUND) ||
+		    (op == KERNEL_POLICY_OP_DELETE && dir == KERNEL_POLICY_DIR_INBOUND)) {
+			dbg("kernel: %s() SPI_TRAP add|delete inbound implemented as no-op", __func__);
 			return true;
 		}
+		/* XXX: what about KERNEL_POLICY_OP_REPLACE? */
 		break;
 	default:
 		break;
 	}
 
-	bool result = kernel_ops->raw_policy(op, expect_kernel_policy,
+	bool result = kernel_ops->raw_policy(op, dir,
+					     expect_kernel_policy,
 					     src_client, dst_client,
 					     shunt_policy,
 					     kernel_policy,
@@ -147,10 +159,8 @@ bool kernel_ops_add_sa(const struct kernel_sa *sa, bool replace, struct logger *
 {
 	LSWDBGP(DBG_BASE, buf) {
 
-		const ip_protocol *src_proto = selector_protocol(*sa->src.client);
-		const ip_protocol *dst_proto = selector_protocol(*sa->dst.client);
-		const ip_protocol *esa_proto = protocol_by_ipproto(sa->esatype);
-		const ip_protocol *transport_proto = protocol_by_ipproto(sa->transport_proto);
+		const ip_protocol *src_proto = selector_protocol(sa->src.client);
+		const ip_protocol *dst_proto = selector_protocol(sa->dst.client);
 
 		jam(buf, "kernel: add_sa()");
 
@@ -159,25 +169,23 @@ bool kernel_ops_add_sa(const struct kernel_sa *sa, bool replace, struct logger *
 		jam(buf, " %s", sa->tunnel ? "tunnel" : "transport");
 
 		jam(buf, " ");
-		jam_selector_subnet_port(buf, sa->src.client);
+		jam_selector_subnet_port(buf, &sa->src.client);
 		jam(buf, "-%s->", src_proto->name);
-		jam_address(buf, sa->src.address);
-		jam(buf, "==%s", esa_proto->name);
+		jam_address(buf, &sa->src.address);
 		jam(buf, "["PRI_IPSEC_SPI"]", pri_ipsec_spi(sa->spi));
 		if (sa->encap_type != NULL) {
 			jam(buf, "=%s", sa->encap_type->name);
 		}
 		jam(buf, "==>");
-		jam_address(buf, sa->dst.address);
+		jam_address(buf, &sa->dst.address);
 		jam(buf, "-%s->", dst_proto->name);
-		jam_selector_subnet_port(buf, sa->dst.client);
+		jam_selector_subnet_port(buf, &sa->dst.client);
 
 		if (sa->esn) jam(buf, " +esn");
 		if (sa->decap_dscp) jam(buf, " +decap_dscp");
 		if (sa->nopmtudisc) jam(buf, " +nopmtudisc");
 
 		jam(buf, " replay_window=%d", sa->replay_window);
-		jam(buf, " transport_proto=%s", transport_proto->name);
 
 		if (sa->ipcomp != NULL) {
 			jam(buf, " %s", sa->ipcomp->common.fqn);
@@ -206,7 +214,6 @@ ipsec_spi_t kernel_ops_get_ipsec_spi(ipsec_spi_t avoid,
 				     const ip_address *src,
 				     const ip_address *dst,
 				     const struct ip_protocol *proto,
-				     bool tunnel_mode,
 				     reqid_t reqid,
 				     uintmax_t min, uintmax_t max,
 				     const char *story,	/* often SAID string */
@@ -219,14 +226,13 @@ ipsec_spi_t kernel_ops_get_ipsec_spi(ipsec_spi_t avoid,
 		jam(buf, "%s", proto->name);
 		jam_string(buf, "->");
 		jam_address(buf, dst);
-		jam_string(buf, (tunnel_mode ? " [tunnel]" : " [transport]"));
 		jam(buf, " reqid=%x", reqid);
 		jam(buf, " [%jx,%jx]", min, max);
 		jam(buf, " for %s ...", story);
 	}
 
 	passert(kernel_ops->get_ipsec_spi != NULL);
-	ipsec_spi_t spi = kernel_ops->get_ipsec_spi(avoid, src, dst, proto, tunnel_mode,
+	ipsec_spi_t spi = kernel_ops->get_ipsec_spi(avoid, src, dst, proto,
 						    reqid, min, max, story, logger);
 	ldbg(logger, "kernel: get_ipsec_spi() ... allocated "PRI_IPSEC_SPI" for %s",
 	     pri_ipsec_spi(spi), story);

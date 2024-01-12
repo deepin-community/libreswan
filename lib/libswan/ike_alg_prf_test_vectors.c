@@ -27,6 +27,7 @@
 #include "pk11pub.h"
 #include "crypt_prf.h"
 #include "crypt_symkey.h"
+#include "ikev2_prf.h"
 
 #include "lswlog.h"
 
@@ -166,6 +167,7 @@ static bool test_prf_vector(const struct prf_desc *prf,
 		? decode_to_chunk(__func__, test->message)
 		: alloc_chunk(test->message_size, __func__);
 	chunk_t prf_output = decode_to_chunk(__func__, test->prf_output);
+	bool ok = true;
 
 
 	/* chunk interface */
@@ -177,7 +179,9 @@ static bool test_prf_vector(const struct prf_desc *prf,
 	if (DBGP(DBG_CRYPT)) {
 		DBG_dump_hunk("chunk output", chunk_output);
 	}
-	bool ok = verify_hunk(test->description, prf_output, chunk_output);
+	if (!verify_hunk(test->description, prf_output, chunk_output)) {
+		ok = false;
+	}
 
 	/* symkey interface */
 	PK11SymKey *symkey_key = symkey_from_hunk("key symkey", chunk_key, logger);
@@ -191,9 +195,10 @@ static bool test_prf_vector(const struct prf_desc *prf,
 	if (DBGP(DBG_CRYPT)) {
 		DBG_symkey(logger, "output", "symkey", symkey_output);
 	}
-	ok = verify_symkey(test->description, prf_output, symkey_output, logger);
+	if (!verify_symkey(test->description, prf_output, symkey_output, logger)) {
+		ok = false;
+	}
 	DBGF(DBG_CRYPT, "%s: %s %s", __func__, test->description, ok ? "passed" : "failed");
-	release_symkey(__func__, "symkey", &symkey_output);
 
 	free_chunk_content(&chunk_message);
 	free_chunk_content(&chunk_key);
@@ -215,6 +220,137 @@ bool test_prf_vectors(const struct prf_desc *desc,
 	     test->description != NULL; test++) {
 		llog(RC_LOG, logger, "  %s", test->description);
 		if (!test_prf_vector(desc, test, logger)) {
+			ok = false;
+		}
+	}
+	return ok;
+}
+
+const struct kdf_test_vector hmac_sha1_kdf_tests[] = {
+	{
+		.description = "CAVP: IKEv2 key derivation with HMAC-SHA1",
+		.ni = "0x32b50d5f4a3763f3",
+		.ni_size = 8,
+		.nr = "0x9206a04b26564cb1",
+		.nr_size = 8,
+		.gir = ("0x4b2c1f971981a8ad8d0abeafabf38cf7"
+			"5fc8349c148142465ed9c8b516b8be52"),
+		.gir_new = ("0x863f3c9d06efd39d2b907b97f8699e5d"
+			    "d5251ef64a2a176f36ee40c87d4f9330"),
+		.gir_size = 32,
+		.spii = "0x34c9e7c188868785",
+		.spir = "0x3ff77d760d2b2199",
+		.skeyseed = "0xa9a7b222b59f8f48645f28a1db5b5f5d7479cba7",
+		.skeyseed_rekey = "0x63e81194946ebd05df7df5ebf5d8750056bf1f1d",
+		.dkm = ("0xa14293677cc80ff8f9cc0eee30d895da"
+			"9d8f405666e30ef0dfcb63c634a46002"
+			"a2a63080e514a062768b76606f9fa5e9"
+			"92204fc5a670bde3f10d6b027113936a"
+			"5c55b648a194ae587b0088d52204b702"
+			"c979fa280870d2ed41efa9c549fd1119"
+			"8af1670b143d384bd275c5f594cf266b"
+			"05ebadca855e4249520a441a81157435"
+			"a7a56cc4"),
+		.dkm_size = 132,
+	},
+	{
+		.description = NULL,
+	}
+};
+
+static bool test_kdf_vector(const struct prf_desc *prf,
+			    const struct kdf_test_vector *test,
+			    struct logger *logger)
+{
+	chunk_t chunk_ni = decode_to_chunk(__func__, test->ni);
+	passert(chunk_ni.len == test->ni_size);
+	chunk_t chunk_nr = decode_to_chunk(__func__, test->nr);
+	passert(chunk_nr.len == test->nr_size);
+	chunk_t chunk_spii = decode_to_chunk(__func__, test->spii);
+	chunk_t chunk_spir = decode_to_chunk(__func__, test->spir);
+	chunk_t chunk_gir = decode_to_chunk(__func__, test->gir);
+	passert(chunk_gir.len == test->gir_size);
+	chunk_t chunk_gir_new = decode_to_chunk(__func__, test->gir_new);
+	passert(chunk_gir_new.len == test->gir_size);
+	chunk_t chunk_skeyseed = decode_to_chunk(__func__, test->skeyseed);
+	chunk_t chunk_skeyseed_rekey =
+		decode_to_chunk(__func__, test->skeyseed_rekey);
+	chunk_t chunk_dkm = decode_to_chunk(__func__, test->dkm);
+	passert(chunk_dkm.len == test->dkm_size);
+	bool ok = true;
+
+
+	/* SKEYSEED = prf(Ni | Nr, g^ir) */
+	PK11SymKey *gir = symkey_from_hunk("gir symkey", chunk_gir, logger);
+	PK11SymKey *skeyseed = ikev2_ike_sa_skeyseed(prf, chunk_ni, chunk_nr,
+						     gir, logger);
+	if (!verify_symkey(test->description, chunk_skeyseed, skeyseed,
+			   logger)) {
+		ok = false;
+	}
+
+	/* prf+ (SKEYSEED, Ni | Nr | SPIi | SPIr) */
+	ike_spis_t spi_ir;
+	passert(sizeof(spi_ir.initiator.bytes) == chunk_spii.len);
+	memcpy(spi_ir.initiator.bytes, chunk_spii.ptr, chunk_spii.len);
+	passert(sizeof(spi_ir.responder.bytes) == chunk_spir.len);
+	memcpy(spi_ir.responder.bytes, chunk_spir.ptr, chunk_spir.len);
+	PK11SymKey *dkm = ikev2_ike_sa_keymat(prf, skeyseed,
+					      chunk_ni, chunk_nr,
+					      &spi_ir,
+					      test->dkm_size,
+					      logger);
+
+	if (!verify_symkey(test->description, chunk_dkm, dkm, logger)) {
+		ok = false;
+	}
+
+	/* SKEYSEED = prf(SK_d (old), g^ir (new) | Ni | Nr) */
+	PK11SymKey *skd = key_from_symkey_bytes("SK_d", dkm,
+                                                 0, prf->prf_key_size,
+                                                 HERE, logger);
+	PK11SymKey *gir_new = symkey_from_hunk("gir_new symkey", chunk_gir_new,
+					       logger);
+	PK11SymKey *skeyseed_rekey =
+		ikev2_ike_sa_rekey_skeyseed(prf, skd, gir_new,
+					    chunk_ni, chunk_nr,
+					    logger);
+	if (!verify_symkey(test->description, chunk_skeyseed_rekey,
+			   skeyseed_rekey, logger)) {
+		ok = false;
+	}
+
+	DBGF(DBG_CRYPT, "%s: %s %s", __func__, test->description,
+	     ok ? "passed" : "failed");
+
+	release_symkey(__func__, "gir", &gir);
+	release_symkey(__func__, "gir_new", &gir_new);
+	release_symkey(__func__, "skeyseed", &skeyseed);
+	release_symkey(__func__, "dkm", &dkm);
+	release_symkey(__func__, "skd", &skd);
+	release_symkey(__func__, "skeyseed_rekey", &skeyseed_rekey);
+
+	free_chunk_content(&chunk_ni);
+	free_chunk_content(&chunk_nr);
+	free_chunk_content(&chunk_gir);
+	free_chunk_content(&chunk_gir_new);
+	free_chunk_content(&chunk_spii);
+	free_chunk_content(&chunk_spir);
+	free_chunk_content(&chunk_skeyseed);
+	free_chunk_content(&chunk_skeyseed_rekey);
+	free_chunk_content(&chunk_dkm);
+	return ok;
+}
+
+bool test_kdf_vectors(const struct prf_desc *desc,
+		      const struct kdf_test_vector *tests,
+		      struct logger *logger)
+{
+	bool ok = true;
+	for (const struct kdf_test_vector *test = tests;
+	     test->description != NULL; test++) {
+		llog(RC_LOG, logger, "  %s", test->description);
+		if (!test_kdf_vector(desc, test, logger)) {
 			ok = false;
 		}
 	}

@@ -15,11 +15,11 @@ $(builddir):
 # just SCRIPT.  Accommodate both.
 
 define transform_script
-	@echo  'IN' $< '->' $(builddir)/$@
-	${TRANSFORM_VARIABLES} < $< > $(builddir)/$*.tmp
-	@if [ -x $< ]; then chmod +x $(builddir)/$*.tmp; fi
-	@if [ "${PROGRAM}" = $* ]; then chmod +x $(builddir)/$*.tmp; fi
-	mv $(builddir)/$*.tmp $(builddir)/$*
+	@echo  'IN' $< '->' $(builddir)/$(notdir $@)
+	${TRANSFORM_VARIABLES} < $< > $(builddir)/$(notdir $@).tmp
+	@if [ -x $< ]; then chmod +x $(builddir)/$(notdir $@).tmp; fi
+	@if [ "${PROGRAM}" = $(notdir $@) ]; then chmod +x $(builddir)/$(notdir $@).tmp; fi
+	mv $(builddir)/$(notdir $@).tmp $(builddir)/$(notdir $@)
 endef
 
 TRANSFORM_DEPS = \

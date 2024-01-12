@@ -20,12 +20,11 @@
 #ifndef _PLUTO_LOG_H
 #define _PLUTO_LOG_H
 
-#include <libreswan.h>
-
 #include "lswcdefs.h"
 #include "lswlog.h"
 #include "fd.h"
 #include "ip_endpoint.h"
+#include "monotime.h"
 
 struct state;
 struct connection;
@@ -48,7 +47,6 @@ extern const struct log_param default_log_param;
  */
 
 extern void pluto_init_log(struct log_param);
-void init_rate_log_timer(void);
 extern void close_log(void);
 
 extern bool log_to_audit;
@@ -153,7 +151,7 @@ void rate_log(const struct msg_digest *md,
 
 void whack_log(enum rc_type rc, const struct fd *whackfd, const char *message, ...) PRINTF_LIKE(3);
 
-extern void show_status(struct show *s);
+extern void show_status(struct show *s, const monotime_t now);
 extern void show_setup_plutomain(struct show *s);
 extern void show_setup_natt(struct show *s);
 extern void show_global_status(struct show *s);

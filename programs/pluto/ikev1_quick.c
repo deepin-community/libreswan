@@ -155,17 +155,24 @@ static v1_notification_t accept_PFS_KE(struct state *st, struct msg_digest *md,
  * Note: this is not called from demux.c
  */
 
-static bool emit_subnet_id(const ip_subnet net,
+static bool emit_subnet_id(enum perspective perspective,
+			   const ip_subnet net,
 			   uint8_t protoid,
 			   uint16_t port,
 			   struct pbs_out *outs)
 {
 	const struct ip_info *ai = subnet_type(&net);
-	const bool usehost = subnet_prefix_bits(net) == ai->mask_cnt;
+	const bool usehost = (subnet_prefix_bits(net) == ai->mask_cnt);
 	pb_stream id_pbs;
 
+	enum ike_id_type idtype =
+		(perspective == REMOTE_PERSPECTIVE &&
+		 impair.v1_remote_quick_id > 0 ? (int)impair.v1_remote_quick_id - 1/*unbias*/ :
+		 usehost ? ai->id_ip_addr :
+		 ai->id_ip_addr_subnet);
+
 	struct isakmp_ipsec_id id = {
-		.isaiid_idtype = usehost ? ai->id_ip_addr : ai->id_ip_addr_subnet,
+		.isaiid_idtype = idtype,
 		.isaiid_protoid = protoid,
 		.isaiid_port = port,
 	};
@@ -174,17 +181,15 @@ static bool emit_subnet_id(const ip_subnet net,
 		return false;
 
 	ip_address tp = subnet_prefix(net);
-	diag_t d = pbs_out_address(&id_pbs, tp, "client network");
-	if (d != NULL) {
-		llog_diag(RC_LOG_SERIOUS, outs->outs_logger, &d, "%s", "");
+	if (!pbs_out_address(&id_pbs, tp, "client network")) {
+		/* already logged */
 		return false;
 	}
 
 	if (!usehost) {
 		ip_address tm = subnet_prefix_mask(net);
-		diag_t d = pbs_out_address(&id_pbs, tm, "client mask");
-		if (d != NULL) {
-			llog_diag(RC_LOG_SERIOUS, outs->outs_logger, &d, "%s", "");
+		if (!pbs_out_address(&id_pbs, tm, "client mask")) {
+			/* already logged */
 			return false;
 		}
 	}
@@ -327,34 +332,32 @@ static void compute_proto_keymat(struct state *st,
 		bad_case(protoid);
 	}
 
-	pi->keymat_len = needed_len;
+	free_chunk_content(&pi->inbound.keymat);
+	pi->inbound.keymat = ikev1_section_5_keymat(st->st_oakley.ta_prf,
+						    st->st_skeyid_d_nss,
+						    st->st_dh_shared_secret,
+						    protoid,
+						    THING_AS_SHUNK(pi->inbound.spi),
+						    st->st_ni, st->st_nr,
+						    needed_len,
+						    st->st_logger);
+	PASSERT(st->st_logger, pi->inbound.keymat.len == needed_len);
 
-	pfreeany(pi->our_keymat);
-	pi->our_keymat = ikev1_section_5_keymat(st->st_oakley.ta_prf,
-						st->st_skeyid_d_nss,
-						st->st_dh_shared_secret,
-						protoid,
-						THING_AS_SHUNK(pi->our_spi),
-						st->st_ni, st->st_nr,
-						needed_len,
-						st->st_logger).ptr;
-
-	pfreeany(pi->peer_keymat);
-	pi->peer_keymat = ikev1_section_5_keymat(st->st_oakley.ta_prf,
-						 st->st_skeyid_d_nss,
-						 st->st_dh_shared_secret,
-						 protoid,
-						 THING_AS_SHUNK(pi->attrs.spi),
-						 st->st_ni, st->st_nr,
-						 needed_len,
-						 st->st_logger).ptr;
+	free_chunk_content(&pi->outbound.keymat);
+	pi->outbound.keymat = ikev1_section_5_keymat(st->st_oakley.ta_prf,
+						     st->st_skeyid_d_nss,
+						     st->st_dh_shared_secret,
+						     protoid,
+						     THING_AS_SHUNK(pi->outbound.spi),
+						     st->st_ni, st->st_nr,
+						     needed_len,
+						     st->st_logger);
+	PASSERT(st->st_logger, pi->outbound.keymat.len == needed_len);
 
 	if (DBGP(DBG_CRYPT)) {
 		DBG_log("%s KEYMAT", satypename);
-		DBG_dump("  KEYMAT computed:", pi->our_keymat,
-			 pi->keymat_len);
-		DBG_dump("  Peer KEYMAT computed:", pi->peer_keymat,
-			 pi->keymat_len);
+		DBG_dump_hunk("  inbound:", pi->inbound.keymat);
+		DBG_dump_hunk("  outbound:", pi->outbound.keymat);
 	}
 }
 
@@ -690,12 +693,10 @@ void quick_outI1(struct fd *whack_sock,
 
 	if (policy & POLICY_PFS) {
 		submit_ke_and_nonce(st, st->st_pfs_group,
-				    quick_outI1_continue,
-				    "quick_outI1 KE");
+				    quick_outI1_continue, HERE);
 	} else {
 		submit_ke_and_nonce(st, NULL /* no-nonce*/,
-				    quick_outI1_continue,
-				    "quick_outI1 KE");
+				    quick_outI1_continue, HERE);
 	}
 }
 
@@ -842,10 +843,12 @@ static stf_status quick_outI1_continue_tail(struct state *st,
 	/* [ IDci, IDcr ] out */
 	if (has_client) {
 		/* IDci (we are initiator), then IDcr (peer is responder) */
-		if (!emit_subnet_id(selector_subnet(c->spd.this.client),
+		if (!emit_subnet_id(LOCAL_PERSPECTIVE,
+				    selector_subnet(c->spd.this.client),
 				    c->spd.this.client.ipproto,
 				    c->spd.this.client.hport, &rbody) ||
-		    !emit_subnet_id(selector_subnet(c->spd.that.client),
+		    !emit_subnet_id(REMOTE_PERSPECTIVE,
+				    selector_subnet(c->spd.that.client),
 				    c->spd.that.client.ipproto,
 				    c->spd.that.client.hport, &rbody)) {
 			return STF_INTERNAL_ERROR;
@@ -1142,7 +1145,7 @@ static stf_status quick_inI1_outR1_tail(struct state *p1st, struct msg_digest *m
 			c->spd.that.client = *remote_client;
 			rehash_db_spd_route_remote_client(&c->spd);
 			c->spd.that.has_client = true;
-			virtual_ip_delref(&c->spd.that.virt, HERE);
+			virtual_ip_delref(&c->spd.that.virt);
 
 			if (selector_eq_address(*remote_client, c->remote->host.addr)) {
 				c->spd.that.has_client = false;
@@ -1249,8 +1252,7 @@ static stf_status quick_inI1_outR1_tail(struct state *p1st, struct msg_digest *m
 		passert(st->st_connection != NULL);
 
 		submit_ke_and_nonce(st, st->st_pfs_group/*possibly-null*/,
-				    quick_inI1_outR1_continue1,
-				    "quick_inI1_outR1_tail");
+				    quick_inI1_outR1_continue1, HERE);
 
 		passert(st->st_connection != NULL);
 		return STF_SUSPEND;
@@ -1918,6 +1920,11 @@ static struct connection *fc_try(const struct connection *c,
 				 const ip_selector *local_client,
 				 const ip_selector *remote_client)
 {
+	if (selector_is_unset(local_client) ||
+	    selector_is_unset(remote_client)) {
+		return NULL;
+	}
+
 	struct connection *best = NULL;
 	policy_prio_t best_prio = BOTTOM_PRIO;
 	const bool remote_is_host = selector_eq_address(*remote_client,
@@ -2101,6 +2108,11 @@ static struct connection *fc_try_oppo(const struct connection *c,
 				      const ip_selector *local_client,
 				      const ip_selector *remote_client)
 {
+	if (selector_is_unset(local_client) ||
+	    selector_is_unset(remote_client)) {
+		return NULL;
+	}
+
 	struct connection *best = NULL;
 	policy_prio_t best_prio = BOTTOM_PRIO;
 
@@ -2220,6 +2232,16 @@ struct connection *find_v1_client_connection(struct connection *const c,
 		DBG_log("find_v1_client_connection starting with %s", c->name);
 		DBG_log("  looking for %s",
 			str_selectors(local_client, remote_client, &sb));
+	}
+
+	if (selector_is_unset(local_client)) {
+		dbg("peer's local client is not set");
+		return NULL;
+	}
+
+	if (selector_is_unset(remote_client)) {
+		dbg("peer's remote client is not set");
+		return NULL;
 	}
 
 	/*

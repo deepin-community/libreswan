@@ -47,166 +47,14 @@
 #include "log.h"
 #include "ip_info.h"
 #include "ip_sockaddr.h"
-#include "nat_traversal.h"	/* for nat_traversal_enabled which seems like a broken idea */
 
-static int bind_udp_socket(const struct iface_dev *ifd, ip_port port,
-			   struct logger *logger)
-{
-	const ip_protocol *protocol = &ip_protocol_udp;
-	ip_endpoint endpoint = endpoint_from_address_protocol_port(ifd->id_address, protocol, port);
-#define BIND_ERROR(MSG, ...)						\
-	{								\
-		int e = errno;						\
-		endpoint_buf eb;					\
-		log_errno(logger, e,					\
-			  "bind %s UDP endpoint %s failed, "MSG,	\
-			  ifd->id_rname, str_endpoint(&endpoint, &eb),	\
-			  ##__VA_ARGS__);				\
-	}
-
-	const struct ip_info *type = address_type(&ifd->id_address);
-	int fd = socket(type->af, SOCK_DGRAM, protocol->ipproto);
-	if (fd < 0) {
-		BIND_ERROR("socket(%s, SOCK_DGRAM, %s)",
-			   type->pf_name, protocol->name);
-		return -1;
-	}
-
-	int fcntl_flags;
-	static const int on = true;     /* by-reference parameter; constant, we hope */
-
-	/* Set socket Nonblocking */
-	if ((fcntl_flags = fcntl(fd, F_GETFL)) >= 0) {
-		if (!(fcntl_flags & O_NONBLOCK)) {
-			fcntl_flags |= O_NONBLOCK;
-			if (fcntl(fd, F_SETFL, fcntl_flags) == -1) {
-				BIND_ERROR("fcntl(F_SETFL, O_NONBLOCK)");
-				/* stumble on? */
-			}
-		}
-	}
-
-	if (fcntl(fd, F_SETFD, FD_CLOEXEC) == -1) {
-		BIND_ERROR("fcntl(F_SETFD, FD_CLOEXEC)");
-		close(fd);
-		return -1;
-	}
-
-	if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR,
-		       (const void *)&on, sizeof(on)) < 0) {
-		BIND_ERROR("setsockopt(SOL_SOCKET, SO_REUSEADDR)");
-		close(fd);
-		return -1;
-	}
-
-#ifdef SO_PRIORITY
-	static const int so_prio = 6; /* rumored maximum priority, might be 7 on linux? */
-	if (setsockopt(fd, SOL_SOCKET, SO_PRIORITY,
-			(const void *)&so_prio, sizeof(so_prio)) < 0) {
-		BIND_ERROR("setsockopt(SOL_SOCKET, SO_PRIORITY)");
-		/* non-fatal */
-	}
-#endif
-
-	if (pluto_sock_bufsize != IKE_BUF_AUTO) {
-#if defined(linux)
-		/*
-		 * Override system maximum
-		 * Requires CAP_NET_ADMIN
-		 */
-		int so_rcv = SO_RCVBUFFORCE;
-		int so_snd = SO_SNDBUFFORCE;
-#else
-		int so_rcv = SO_RCVBUF;
-		int so_snd = SO_SNDBUF;
-#endif
-		if (setsockopt(fd, SOL_SOCKET, so_rcv,
-			       (const void *)&pluto_sock_bufsize,
-			       sizeof(pluto_sock_bufsize)) < 0) {
-			BIND_ERROR("setsockopt(SOL_SOCKET, SO_RCVBUFFORCE)");
-		}
-		if (setsockopt(fd, SOL_SOCKET, so_snd,
-			       (const void *)&pluto_sock_bufsize,
-			       sizeof(pluto_sock_bufsize)) < 0) {
-			BIND_ERROR("setsockopt(SOL_SOCKET, SO_SNDBUFFORCE)");
-		}
-	}
-
-	/* To improve error reporting.  See ip(7). */
-#ifdef MSG_ERRQUEUE
-	if (pluto_sock_errqueue) {
-		if (setsockopt(fd, SOL_IP, IP_RECVERR, (const void *)&on, sizeof(on)) < 0) {
-			BIND_ERROR("setsockopt(SOL_IP, IP_RECVERR)");
-			close(fd);
-			return -1;
-		}
-		dbg("MSG_ERRQUEUE enabled on fd %d", fd);
-	}
-#endif
-
-	/*
-	 * With IPv6, there is no fragmentation after it leaves our
-	 * interface.  PMTU discovery is mandatory but doesn't work
-	 * well with IKE (why?).  So we must set the IPV6_USE_MIN_MTU
-	 * option.  See draft-ietf-ipngwg-rfc2292bis-01.txt 11.1
-	 */
-#ifdef IPV6_USE_MIN_MTU /* YUCK: not always defined */
-	if (type == &ipv6_info &&
-	    setsockopt(fd, IPPROTO_IPV6, IPV6_USE_MIN_MTU,
-		       (const void *)&on, sizeof(on)) < 0) {
-		BIND_ERROR("setsockopt(IPPROTO_IPV6, IPV6_USE_MIN_MTU)");
-		close(fd);
-		return -1;
-	}
-#endif
-
-	/*
-	 * NETKEY requires us to poke an IPsec policy hole that allows
-	 * IKE packets. This installs one IPsec policy per socket
-	 * but this function is called for each: IPv4 port 500 and
-	 * 4500 IPv6 port 500
-	 */
-	if (kernel_ops->poke_ipsec_policy_hole != NULL &&
-	    !kernel_ops->poke_ipsec_policy_hole(ifd, fd, logger)) {
-		/* already logged */
-		close(fd);
-		return -1;
-	}
-
-	/*
-	 * ??? does anyone care about the value of port of ifp->addr?
-	 * Old code seemed to assume that it should be reset to pluto_port.
-	 * But only on successful bind.  Seems wrong or unnecessary.
-	 */
-	ip_endpoint if_endpoint = endpoint_from_address_protocol_port(ifd->id_address,
-								      &ip_protocol_udp,
-								      port);
-	ip_sockaddr if_sa = sockaddr_from_endpoint(if_endpoint);
-	if (bind(fd, &if_sa.sa.sa, if_sa.len) < 0) {
-		BIND_ERROR("bind()");
-		close(fd);
-		return -1;
-	}
-
-	/* poke a hole for IKE messages in the IPsec layer */
-	if (kernel_ops->exceptsocket != NULL) {
-		if (!kernel_ops->exceptsocket(fd, AF_INET, logger)) {
-			/* already logged */
-			close(fd);
-			return -1;
-		}
-	}
-
-	return fd;
-#undef BIND_ERROR
-}
-
-static bool nat_traversal_espinudp(int sk, struct iface_dev *ifd,
+#ifdef UDP_ENCAP
+static bool nat_traversal_espinudp(const struct iface_endpoint *ifp,
 				   struct logger *logger)
 {
-	const char *fam = address_type(&ifd->id_address)->ip_name;
-	dbg("NAT-Traversal: Trying sockopt style NAT-T");
-
+	const char *fam = endpoint_type(&ifp->local_endpoint)->ip_name;
+	ldbg(logger, "NAT-Traversal: Trying sockopt style NAT-T");
+ 
 	/*
 	 * The SOL (aka socket level) is really the the protocol
 	 * number which, for UDP, is always 17.  Linux provides a
@@ -232,21 +80,18 @@ static bool nat_traversal_espinudp(int sk, struct iface_dev *ifd,
 	 */
 	const int sol_value = UDP_ENCAP_ESPINUDP;
 
-	int r = setsockopt(sk, sol_udp, sol_name, &sol_value, sizeof(sol_value));
+	int r = setsockopt(ifp->fd, sol_udp, sol_name, &sol_value, sizeof(sol_value));
 	if (r == -1) {
-		dbg("NAT-Traversal: ESPINUDP(%d) setup failed for sockopt style NAT-T family %s (errno=%d)",
-		    sol_value, fam, errno);
-		/* all methods failed to detect NAT-T support */
-		llog(RC_LOG_SERIOUS, logger,
-			    "NAT-Traversal: ESPINUDP for this kernel not supported or not found for family %s; NAT-traversal is turned OFF", fam);
-		nat_traversal_enabled = false;
+		ldbg(logger, "NAT-Traversal: ESPINUDP(%d) setup failed for sockopt style NAT-T family %s (errno=%d)",
+		     sol_value, fam, errno);
 		return false;
 	}
 
-	dbg("NAT-Traversal: ESPINUDP(%d) setup succeeded for sockopt style NAT-T family %s",
-	    sol_value, fam);
+	ldbg(logger, "NAT-Traversal: ESPINUDP(%d) setup succeeded for sockopt style NAT-T family %s",
+	     sol_value, fam);
 	return true;
 }
+#endif /* ifdef UDP_ENCAP */
 
 #ifdef MSG_ERRQUEUE
 static bool check_msg_errqueue(const struct iface_endpoint *ifp,
@@ -401,11 +246,7 @@ static struct msg_digest * udp_read_packet(struct iface_endpoint **ifpp,
 		return NULL;
 	}
 
-	struct msg_digest *md = alloc_md(ifp, &sender, HERE);
-	init_pbs(&md->packet_pbs,
-		 clone_bytes(packet_ptr, packet_len,
-			     "message buffer in udp_read_packet()"),
-		 packet_len, "packet");
+	struct msg_digest *md = alloc_md(ifp, &sender, packet_ptr, packet_len, HERE);
 	return md;
 }
 
@@ -433,21 +274,6 @@ static void udp_listen(struct iface_endpoint *ifp,
 	}
 }
 
-static int udp_bind_iface_endpoint(struct iface_dev *ifd, ip_port port,
-				   bool esp_encapsulation_enabled,
-				   struct logger *logger)
-{
-	int fd = bind_udp_socket(ifd, port, logger);
-	if (fd < 0) {
-		return -1;
-	}
-	if (esp_encapsulation_enabled &&
-	    !nat_traversal_espinudp(fd, ifd, logger)) {
-		dbg("nat-traversal failed");
-	}
-	return fd;
-}
-
 static void udp_cleanup(struct iface_endpoint *ifp)
 {
 	detach_fd_read_listener(&ifp->udp.read_listener);
@@ -455,11 +281,17 @@ static void udp_cleanup(struct iface_endpoint *ifp)
 
 const struct iface_io udp_iface_io = {
 	.send_keepalive = true,
+	.socket = {
+		.type = SOCK_DGRAM,
+		.type_name = "SOCK_DGRAM",
+	},
 	.protocol = &ip_protocol_udp,
 	.read_packet = udp_read_packet,
 	.write_packet = udp_write_packet,
 	.listen = udp_listen,
-	.bind_iface_endpoint = udp_bind_iface_endpoint,
+#ifdef UDP_ENCAP
+	.enable_esp_encap = nat_traversal_espinudp,
+#endif
 	.cleanup = udp_cleanup,
 };
 
@@ -661,14 +493,14 @@ static bool check_msg_errqueue(const struct iface_endpoint *ifp, short interest,
 					return false;
 				}
 				again_count++;
-				log_errno(logger, errno,
-					  "recvmsg(,, MSG_ERRQUEUE) on %s failed (noticed before %s) (attempt %d)",
-					  ifp->ip_dev->id_rname, before, again_count);
+				llog_error(logger, errno,
+					   "recvmsg(,, MSG_ERRQUEUE) on %s failed (noticed before %s) (attempt %d)",
+					   ifp->ip_dev->id_rname, before, again_count);
 				continue;
 			}
-			log_errno(logger, errno,
-				  "recvmsg(,, MSG_ERRQUEUE) on %s failed (noticed before %s)",
-				  ifp->ip_dev->id_rname, before);
+			llog_error(logger, errno,
+				   "recvmsg(,, MSG_ERRQUEUE) on %s failed (noticed before %s)",
+				   ifp->ip_dev->id_rname, before);
 			break;
 		}
 		passert(packet_len >= 0);

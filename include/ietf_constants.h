@@ -1117,6 +1117,7 @@ enum ikev1_ipsec_attr {
 	SIG_ENC_ALGO_VAL = 13, /* RFC 4359 */
 	ADDRESS_PRESERVATION = 14, /* RFC 6407 */
 	SA_DIRECTION = 15, /* RFC 6407 */
+	IPSEC_ATTR_VAL_DESCS_ROOF,
 
 	SECCTX = 32001, /* B/V */ /* chosen from private range as in RFC 2407 */
 };
@@ -1674,12 +1675,20 @@ enum gw_identity_type {
 #define MAX_REDIRECTS 5
 #define REDIRECT_LOOP_DETECT_PERIOD 300
 
-/* Public key algorithm number in IPSECKEY DNS RR. See RFC 4025 2.4 */
-enum pubkey_alg {
-	PUBKEY_ALG_DSA = 1,
-	PUBKEY_ALG_RSA = 2,
-	PUBKEY_ALG_ECDSA = 3,
+/*
+ * Public key algorithm number in IPSECKEY DNS RR. See RFC 4025 2.4.
+ */
+
+enum ipseckey_algorithm_type {
+	IPSECKEY_ALGORITHM_DSA = 1,
+	IPSECKEY_ALGORITHM_RSA = 2,
+	IPSECKEY_ALGORITHM_ECDSA = 3,
+	/* E*D*DSA? */
+	IPSECKEY_ALGORITHM_X_PUBKEY = 4, /* Subject Public Key Info - guess */
 };
+
+extern const struct enum_names ipseckey_algorithm_type_names;
+extern const struct enum_names ipseckey_algorithm_config_names; /* in ipsec.conf */
 
 /*
  * IKEv1 Identification type values
@@ -2073,14 +2082,6 @@ enum digital_signature_blob {
 #define RSA_MIN_OCTETS BYTES_FOR_BITS(512)
 #define RSA_MIN_OCTETS_UGH \
 	"RSA modulus too small for security: less than 512 bits"
-
-#define RSA_MAX_OCTETS BYTES_FOR_BITS(8192)
-#define RSA_MAX_OCTETS_UGH "RSA modulus too large: more than 8192 bits"
-
-/* Note: RFC 2537 encoding adds a few bytes. If you use a small
- * modulus like 3, the overhead is only 2 bytes
- */
-#define RSA_MAX_ENCODING_BYTES (RSA_MAX_OCTETS + 2)
 
 #define ISA_MAJ_SHIFT 4
 #define ISA_MIN_MASK (~((~0u) << ISA_MAJ_SHIFT))

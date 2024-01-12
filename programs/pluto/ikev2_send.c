@@ -68,12 +68,12 @@ bool send_recorded_v2_message(struct ike_sa *ike,
 }
 
 void record_v2_outgoing_fragment(struct pbs_out *pbs,
-				 const char *what,
+				 const char *what UNUSED,
 				 struct v2_outgoing_fragment **frags)
 {
 	pexpect(*frags == NULL);
 	shunk_t frag = same_pbs_out_as_shunk(pbs);
-	*frags = alloc_bytes(sizeof(struct v2_outgoing_fragment) + frag.len, what);
+	*frags = over_alloc_thing(struct v2_outgoing_fragment, frag.len);
 	(*frags)->len = frag.len;
 	memcpy((*frags)->ptr/*array*/, frag.ptr, frag.len);
 }
@@ -95,7 +95,6 @@ void record_v2_message(struct ike_sa *ike,
 bool emit_v2UNKNOWN(const char *victim, enum isakmp_xchg_type exchange_type,
 		    struct pbs_out *outs)
 {
-	diag_t d;
 	llog(RC_LOG, outs->outs_logger,
 	     "IMPAIR: adding an unknown%s payload of type %d to %s %s",
 	     impair.unknown_v2_payload_critical ? " critical" : "",
@@ -106,10 +105,9 @@ bool emit_v2UNKNOWN(const char *victim, enum isakmp_xchg_type exchange_type,
 		.isag_critical = build_ikev2_critical(impair.unknown_v2_payload_critical, outs->outs_logger),
 	};
 	struct pbs_out pbs;
-	d = pbs_out_struct(outs, &ikev2_unknown_payload_desc, &gen, sizeof(gen), &pbs);
-	if (d != NULL) {
-		llog_diag(RC_LOG_SERIOUS, outs->outs_logger, &d, "%s", "");
-		return false;
+	if (!pbs_out_struct(outs, &ikev2_unknown_payload_desc, &gen, sizeof(gen), &pbs)) {
+		/* already logged */
+		return false; /*fatal*/
 	}
 	close_output_pbs(&pbs);
 	return true;
@@ -148,7 +146,10 @@ bool emit_v2Nsa_pl(v2_notification_t ntype,
 		   struct pbs_out *payload_pbs /* optional */)
 {
 	/* See RFC 5996 section 3.10 "Notify Payload" */
-	passert(protoid == PROTO_v2_RESERVED || protoid == PROTO_v2_AH || protoid == PROTO_v2_ESP);
+	PASSERT(outs->outs_logger, (impair.emitting ||
+				    protoid == PROTO_v2_RESERVED ||
+				    protoid == PROTO_v2_AH ||
+				    protoid == PROTO_v2_ESP));
 
 	switch (ntype) {
 	case v2N_INVALID_SELECTORS:
@@ -179,9 +180,8 @@ bool emit_v2Nsa_pl(v2_notification_t ntype,
 	if (!out_struct(&n, &ikev2_notify_desc, outs, &pls))
 		return false;
 	if (spi != NULL) {
-		diag_t d = pbs_out_raw(&pls, spi, sizeof(*spi), "SPI");
-		if (d != NULL) {
-			llog_diag(RC_LOG_SERIOUS, outs->outs_logger, &d, "%s", "");
+		if (!pbs_out_raw(&pls, spi, sizeof(*spi), "SPI")) {
+			/* already logged */
 			return false;
 		}
 	}
@@ -211,9 +211,8 @@ bool emit_v2N_bytes(v2_notification_t ntype,
 		return false;
 	}
 
-	diag_t d = pbs_out_raw(&pl, bytes, size, "Notify data");
-	if (d != NULL) {
-		llog_diag(RC_LOG_SERIOUS, outs->outs_logger, &d, "%s", "");
+	if (!pbs_out_raw(&pl, bytes, size, "Notify data")) {
+		/* already logged */
 		return false;
 	}
 
@@ -242,10 +241,9 @@ bool emit_v2N_SIGNATURE_HASH_ALGORITHMS(lset_t sighash_policy,
 	if (sighash_policy & POLICY) {					\
 		uint16_t hash_id = htons(ID);				\
 		passert(sizeof(hash_id) == RFC_7427_HASH_ALGORITHM_IDENTIFIER_SIZE); \
-		diag_t d = pbs_out_raw(&n_pbs, &hash_id, sizeof(hash_id), \
-				       "hash algorithm identifier "#ID);\
-		if (d != NULL) {					\
-			llog_diag(RC_LOG_SERIOUS, outs->outs_logger, &d, "%s", ""); \
+		if (!pbs_out_raw(&n_pbs, &hash_id, sizeof(hash_id),	\
+				 "hash algorithm identifier "#ID)) {	\
+			/* already logged */				\
 			return false;					\
 		}							\
 	}

@@ -25,6 +25,12 @@
 
 #include <arpa/inet.h>	/* for inet_ntop */
 #include <arpa/nameser.h>
+
+#include "ttodata.h"
+#include "ip_address.h"
+#include "ip_info.h"
+#include "id.h"
+
 #include "defs.h"
 #include "log.h"
 #include "constants.h"	/* for demux.h */
@@ -32,14 +38,11 @@
 #include "state.h"
 #include "connections.h"
 #include "dnssec.h"	/* for lswub_resolve_event_secure_kind */
-#include "id.h"
 #include "ikev2.h"
 #include "ikev2_ipseckey.h"
 #include "ikev2_ipseckey_dnsr.h"
 #include "keys.h"
 #include "secrets.h"
-#include "ip_address.h"
-#include "ip_info.h"
 #include "ikev2_ike_auth.h"
 
 #define LDNS_RR_TYPE_A 1
@@ -104,17 +107,19 @@ static void add_dns_pubkeys_to_pluto(struct p_dns_req *dnsr, struct dns_pubkey *
 			    enum_name(&dns_auth_level_names, al));
 		}
 
-		chunk_t keyval = chunk2(dns_pubkey->ptr, dns_pubkey->len);
-		err_t ugh = add_public_key(keyid, /*dns_auth_level*/al,
-					   &pubkey_type_rsa,
-					   install_time, realtimesum(install_time, deltatime(ttl_used)),
-					   ttl, &keyval, NULL/*don't-return-pubkey*/, &pluto_pubkeys);
-		if (ugh != NULL) {
+		diag_t d = unpack_dns_ipseckey(keyid, /*dns_auth_level*/al,
+					       dns_pubkey->algorithm_type,
+					       install_time,
+					       realtimesum(install_time, deltatime(ttl_used)),
+					       ttl,
+					       dns_pubkey->pubkey,
+					       NULL/*don't-return-pubkey*/, &pluto_pubkeys);
+		if (d != NULL) {
 			id_buf thatidbuf;
-			llog(RC_LOG_SERIOUS, dnsr->logger,
-			     "add publickey failed %s, %s, %s", ugh,
-			     str_id(&st->st_connection->remote->host.id, &thatidbuf),
-			     dnsr->log_buf);
+			llog_diag(RC_LOG_SERIOUS, dnsr->logger, &d,
+				  "add %s publickey failed, %s",
+				  str_id(&st->st_connection->remote->host.id, &thatidbuf),
+				  dnsr->log_buf);
 		}
 	}
 }
@@ -381,7 +386,7 @@ static struct p_dns_req *qry_st_init(struct ike_sa *ike,
 	p->log_buf = alloc_printf("IKEv2 DNS query -- %s IN %s --",
 				  p->qname, qtype_name);
 
-	p->qclass = ns_c_in;
+	p->qclass = C_IN; /* aka ns_c_in */
 	p->qtype = qtype;
 	p->cache_hit = true;
 	p->dns_status = DNS_SUSPEND;

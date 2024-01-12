@@ -22,13 +22,6 @@
  * checking by code that only includes constants.h.
  */
 
-#include <stddef.h>
-#include <string.h>
-#include <stdio.h>
-#include <netinet/in.h>
-#ifdef KERNEL_XFRM
-#include "linux/xfrm.h" /* local (if configured) or system copy */
-#endif
 #include "passert.h"
 
 #include "jambuf.h"
@@ -62,22 +55,6 @@ enum_names dpd_action_names = {
 	"action:", /* prefix */
 	NULL
 };
-
-#ifdef KERNEL_XFRM
-/* netkey SA direction names */
-static const char *const netkey_sa_dir_name[] = {
-	"XFRM_IN",
-	"XFRM_OUT",
-	"XFRM_FWD",
-};
-
-enum_names netkey_sa_dir_names = {
-	XFRM_POLICY_IN, XFRM_POLICY_FWD,
-	ARRAY_REF(netkey_sa_dir_name),
-	NULL, /* prefix */
-	NULL
-};
-#endif
 
 /* systemd watchdog action names */
 static const char *const sd_action_name[] = {
@@ -282,21 +259,32 @@ enum_names dns_auth_level_names = {
 /* enum kernel_policy_op_names */
 
 static const char *kernel_policy_op_name[] = {
-	[0] = "KP_INVALID",
 #define S(E) [E] = #E
-	S(KP_ADD_OUTBOUND),
-	S(KP_REPLACE_OUTBOUND),
-	S(KP_DELETE_OUTBOUND),
-	S(KP_ADD_INBOUND),
-	S(KP_REPLACE_INBOUND),
-	S(KP_DELETE_INBOUND),
+	S(KERNEL_POLICY_OP_ADD),
+	S(KERNEL_POLICY_OP_DELETE),
+	S(KERNEL_POLICY_OP_REPLACE),
 #undef S
 };
 
 enum_names kernel_policy_op_names = {
 	0, elemsof(kernel_policy_op_name)-1,
 	ARRAY_REF(kernel_policy_op_name),
-	.en_prefix = "KP_",
+	.en_prefix = "KERNEL_POLICY_OP_",
+};
+
+/* enum kernel_policy_dir_names */
+
+static const char *kernel_policy_dir_name[] = {
+#define S(E) [E] = #E
+	S(KERNEL_POLICY_DIR_OUTBOUND),
+	S(KERNEL_POLICY_DIR_INBOUND),
+#undef S
+};
+
+enum_names kernel_policy_dir_names = {
+	0, elemsof(kernel_policy_dir_name)-1,
+	ARRAY_REF(kernel_policy_dir_name),
+	.en_prefix = "KERNEL_POLICY_DIR_",
 };
 
 /* */
@@ -360,12 +348,10 @@ static const enum_names *pluto_enum_names_checklist[] = {
 	&natt_method_names,
 	&routing_story,
 	&stf_status_names,
-#ifdef KERNEL_XFRM
-	&netkey_sa_dir_names,
-#endif
 	&perspective_names,
 	&sa_policy_bit_names,
 	&kernel_policy_op_names,
+	&kernel_policy_dir_names,
 	&shunt_policy_names,
 	&keyword_auth_names,
 	&keyword_host_names,

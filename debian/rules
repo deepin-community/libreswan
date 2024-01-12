@@ -31,6 +31,7 @@ NSS_AVA_MISSING=$(shell if printf '#include <cert.h>\nint main() { return CERT_C
 
 DEBIAN_LIBRESWAN_BUILD_FLAGS = \
 		ARCH=$(DEB_HOST_ARCH) \
+		OBJDIR=OBJ.$(DEB_HOST_ARCH_OS).$(DEB_HOST_ARCH) \
 		IPSECVERSION=$(DEB_VERSION_UPSTREAM) \
 		PREFIX=/usr \
 		FINALLIBEXECDIR=/usr/libexec/ipsec \

@@ -63,7 +63,7 @@ west #
 000 "192.1.2.45-to-192.1.2.23":   modecfg info: us:none, them:none, modecfg policy:push, dns:unset, domains:unset, cat:unset;
 000 "192.1.2.45-to-192.1.2.23":   sec_label:unset;
 000 "192.1.2.45-to-192.1.2.23":   CAs: 'C=CA, ST=Ontario, L=Toronto, O=Libreswan, OU=Test Department, CN=Libreswan test CA for mainca, E=testing@libreswan.org'...'%any'
-000 "192.1.2.45-to-192.1.2.23":   ike_life: 28800s; ipsec_life: 28800s; replay_window: 128; rekey_margin: 540s; rekey_fuzz: 100%; keyingtries: 0;
+000 "192.1.2.45-to-192.1.2.23":   ike_life: 28800s; ipsec_life: 28800s; ipsec_max_bytes: 2^63B; ipsec_max_packets: 2^63; replay_window: 128; rekey_margin: 540s; rekey_fuzz: 100%; keyingtries: 0;
 000 "192.1.2.45-to-192.1.2.23":   retransmit-interval: 9999ms; retransmit-timeout: 99s; iketcp:no; iketcp-port:4500;
 000 "192.1.2.45-to-192.1.2.23":   initial-contact:no; cisco-unity:no; fake-strongswan:no; send-vendorid:no; send-no-esp-tfc:no;
 000 "192.1.2.45-to-192.1.2.23":   policy: IKEv2+RSASIG+ECDSA+RSASIG_v1_5+ENCRYPT+TUNNEL+PFS+IKE_FRAG_ALLOW+ESN_NO+ESN_YES;
@@ -73,7 +73,7 @@ west #
 000 "192.1.2.45-to-192.1.2.23":   our idtype: ID_IPV4_ADDR; our id=192.1.2.45; their idtype: %fromcert; their id=%fromcert
 000 "192.1.2.45-to-192.1.2.23":   liveness: passive; dpdaction:hold; dpddelay:0s; retransmit-timeout:60s
 000 "192.1.2.45-to-192.1.2.23":   nat-traversal: encaps:auto; keepalive:20s
-000 "192.1.2.45-to-192.1.2.23":   newest ISAKMP SA: #0; newest IPsec SA: #0; conn serial: $1;
+000 "192.1.2.45-to-192.1.2.23":   newest IKE SA: #0; newest IPsec SA: #0; conn serial: $1;
 west #
  # connection is ondemand, but we will --up so we can see X.509 auth
 west #
@@ -83,9 +83,9 @@ west #
 west #
  ipsec auto --up 192.1.2.45-to-192.1.2.23
 1v2 "192.1.2.45-to-192.1.2.23" #1: initiating IKEv2 connection
-1v2 "192.1.2.45-to-192.1.2.23" #1: sent IKE_SA_INIT request
+1v2 "192.1.2.45-to-192.1.2.23" #1: sent IKE_SA_INIT request to 192.1.2.23:500
 1v2 "192.1.2.45-to-192.1.2.23" #1: sent IKE_AUTH request {cipher=AES_GCM_16_256 integ=n/a prf=HMAC_SHA2_512 group=MODP2048}
-003 "192.1.2.45-to-192.1.2.23" #1: initiator established IKE SA; authenticated using RSASSA-PSS with SHA2_512 and peer certificate 'C=CA, ST=Ontario, L=Toronto, O=Libreswan, OU=Test Department, CN=east.testing.libreswan.org, E=user-east@testing.libreswan.org' issued by CA 'C=CA, ST=Ontario, L=Toronto, O=Libreswan, OU=Test Department, CN=Libreswan test CA for mainca, E=testing@libreswan.org'
+003 "192.1.2.45-to-192.1.2.23" #1: initiator established IKE SA; authenticated peer '3nnn-bit RSASSA-PSS with SHA2_512' digital signature using peer certificate 'C=CA, ST=Ontario, L=Toronto, O=Libreswan, OU=Test Department, CN=east.testing.libreswan.org, E=user-east@testing.libreswan.org' issued by CA 'C=CA, ST=Ontario, L=Toronto, O=Libreswan, OU=Test Department, CN=Libreswan test CA for mainca, E=testing@libreswan.org'
 004 "192.1.2.45-to-192.1.2.23" #2: initiator established Child SA using #1; IPsec tunnel [192.1.2.45-192.1.2.45:0-65535 0] -> [192.1.2.23-192.1.2.23:0-65535 0] {ESP/ESN=>0xESPESP <0xESPESP xfrm=AES_GCM_16_256-NONE DPD=passive}
 west #
  ping -n -q -c 4 -I 192.1.2.45 192.1.2.23
@@ -97,7 +97,7 @@ west #
  # show non-zero IPsec traffic counters
 west #
  ipsec whack --trafficstatus
-006 #2: "192.1.2.45-to-192.1.2.23", type=ESP, add_time=1234567890, inBytes=336, outBytes=336, id='C=CA, ST=Ontario, L=Toronto, O=Libreswan, OU=Test Department, CN=east.testing.libreswan.org, E=user-east@testing.libreswan.org'
+006 #2: "192.1.2.45-to-192.1.2.23", type=ESP, add_time=1234567890, inBytes=336, outBytes=336, maxBytes=2^63B, id='C=CA, ST=Ontario, L=Toronto, O=Libreswan, OU=Test Department, CN=east.testing.libreswan.org, E=user-east@testing.libreswan.org'
 west #
  echo done
 done

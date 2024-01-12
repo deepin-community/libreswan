@@ -259,15 +259,12 @@ static stf_status emit_v2TS(struct pbs_out *outpbs,
 		if (!out_struct(&ts_ports, &ikev2_ts_portrange_desc, &ts_range_pbs, NULL))
 			return STF_INTERNAL_ERROR;
 
-		diag_t d;
-		d = pbs_out_address(&ts_range_pbs, range_start(ts->net), "IP start");
-		if (d != NULL) {
-			llog_diag(RC_LOG_SERIOUS, outpbs->outs_logger, &d, "%s", "");
+		if (!pbs_out_address(&ts_range_pbs, range_start(ts->net), "IP start")) {
+			/* already logged */
 			return STF_INTERNAL_ERROR;
 		}
-		d = pbs_out_address(&ts_range_pbs, range_end(ts->net), "IP end");
-		if (d != NULL) {
-			llog_diag(RC_LOG_SERIOUS, outpbs->outs_logger, &d, "%s", "");
+		if (!pbs_out_address(&ts_range_pbs, range_end(ts->net), "IP end")) {
+			/* already logged */
 			return STF_INTERNAL_ERROR;
 		}
 		close_output_pbs(&ts_range_pbs);
@@ -299,9 +296,8 @@ static stf_status emit_v2TS(struct pbs_out *outpbs,
 
 		dbg("emitting sec_label="PRI_SHUNK, pri_shunk(ts->sec_label));
 
-		diag_t d = pbs_out_hunk(&ts_label_pbs, ts->sec_label, "output Security label");
-		if (d != NULL) {
-			llog_diag(RC_LOG_SERIOUS, outpbs->outs_logger, &d, "%s", "");
+		if (!pbs_out_hunk(&ts_label_pbs, ts->sec_label, "output Security label")) {
+			/* already logged */
 			return STF_INTERNAL_ERROR;
 		}
 
@@ -440,6 +436,11 @@ static bool v2_parse_tss(struct payload_digest *const ts_pd,
 
 		d = pbs_in_struct(&ts_pd->pbs, &ikev2_ts_header_desc,
 			  &ts_h, sizeof(ts_h), &ts_body_pbs);
+
+		if (d != NULL) {
+			llog_diag(RC_LOG, logger, &d, "%s", "");
+			return false;
+		}
 
 		switch (ts_h.isath_type) {
 		case IKEv2_TS_IPV4_ADDR_RANGE:

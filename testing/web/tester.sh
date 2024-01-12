@@ -28,9 +28,9 @@ bindir=$(dirname $0)
 makedir=$(cd ${bindir}/../.. && pwd)
 utilsdir=${makedir}/testing/utils
 
-# start with new shiny domains
+# start with new shiny new just upgraded domains
 
-kvm_setup=kvm-purge
+build_kvms=true
 
 # Select the oldest commit to test.
 #
@@ -126,12 +126,28 @@ while true ; do
 
     ${status} "looking for work"
     if ! commit=$(${bindir}/gime-work.sh ${summarydir} ${repodir} ${earliest_commit}) ; then \
-	# Seemlingly nothing to do; github gets updated up every 15
-	# minutes so sleep for less than that
-	seconds=$(expr 10 \* 60)
+	# Seemlingly nothing to do ...
+
+	# github gets updated up every 15 minutes so sleep for less
+	# than that
+	delay=$(expr 10 \* 60)
 	now=$(date +%s)
-	future=$(expr ${now} + ${seconds})
-	${status} "idle; will retry $(date -u -d @${future} +%H:%M)"
+	future=$(expr ${now} + ${delay})
+
+	# do something productive
+	${status} "idle; deleting debug.log.gz files older than 30 days"
+	find ${summarydir} -type f -name 'debug.log.gz' -mtime +30 -print0 | \
+	    xargs -0 --no-run-if-empty rm -v
+
+	# is there still time?
+	now=$(date +%s)
+	if test ${future} -lt ${now} ; then
+	    ${status} "the future (${future}) is now (${now})"
+	    continue
+	fi
+
+	seconds=$(expr ${future} - ${now})
+	${status} "idle; will retry at $(date -u -d @${future} +%H:%M) ($(date -u -d @${now} +%H:%M) + ${seconds}s)"
 	sleep ${seconds}
 	continue
     fi
@@ -164,31 +180,123 @@ while true ; do
 	 WEB_RESULTSDIR=${resultsdir} \
 	 WEB_SUMMARYDIR=${summarydir}
 
-    # Run the testsuite
     #
-    # This list should match results.html.  Should a table be
-    # generated?
+    # Clenup ready for the new run
     #
-    # ${kvm_setup} starts out as kvm-purge but then flips to
-    # kvm-shutdown.  For kvm-purge, since it is only invoked when the
-    # script is first changing and the REPO is at HEAD, the upgrade /
-    # transmogrify it triggers will always be for the latest changes.
 
-    targets="distclean ${kvm_setup} kvm-transmogrify kvm-keys kvm-install kvm-test"
-    kvm_setup=kvm-shutdown
-    for target in ${targets}; do
+    ${status} "running distclean"
+    run distclean
+
+    #
+    # Build / update / test the repo
+    #
+    # This list should match the hardwired list in results.html.
+    # Should a table be generated?
+    #
+    # XXX: should run ./kvm
+    #
+    # - kvm-install triggers kvm-keys and kvm-install- et.al.,
+    #   kvm-install-... so break each of these steps down.
+    #
+    # - make targets like upgrade explicit so it is clear where things
+    #   fail
+    #
+    # - always transmogrify so current config is picked up
+    #
+    # - the leading "-" means ignore failure; kind of like commands in
+    #   make rules
+
+    targets=""
+    finished=""
+
+    if ${build_kvms} ; then
+	targets="${targets} kvm-purge"
+	setup="upgrade transmogrify install"
+    else
+	targets="${targets} kvm-shutdown"
+	setup="transmogrify install"
+    fi
+    build_kvms=false # for next time round
+
+    p=
+    for os in fedora freebsd netbsd openbsd ; do
+	for s in ${setup} ; do
+	    targets="${targets} ${p}kvm-${s}-${os}"
+	done
+	p=-
+    done
+
+    targets="${targets} kvm-keys"
+    targets="${targets} kvm-check"
+
+    # list of raw results; will be converted to an array
+    cp /dev/null ${resultsdir}/build.json.in
+
+    for t in ${targets} ; do
+
+	# ignorable?
+	target=$(expr "${t}" : '-\?\(.*\)')
+	ignore=$(test "${target}" == "${t}" && echo false || echo true)
+	finished="${finished} ${target}"
+	logfile=${resultsdir}/${target}.log
+	cp /dev/null ${logfile}
+
 	# generate json of the progress
-	touch ${resultsdir}/${target}.log
-	${bindir}/json-make.sh --json ${resultsdir}/make.json --resultsdir ${resultsdir} ${targets}
+	{
+	    cat ${resultsdir}/build.json.in
+	    # same command further down
+	    jq --null-input \
+	       --arg target "${target}" \
+	       --arg status running \
+	       '{ target: $target, status: $status }'
+	} | jq -s . > ${resultsdir}/build.json
+
 	# run the target on hand
-	if ! run ${target} ; then
+	if run ${target} ; then
+	    result=ok
+	elif ${ignore} ; then
+	    # ex -kvm-install-openbsd = kvm-install-openbsd?
+	    result=ignored
+	else
+	    result=failed
+	fi
+
+	# generate json of the final result
+
+	# same command further up
+	{
+	    jq --null-input \
+	       --arg target "${target}" \
+	       --arg status "${result}" \
+	       '{ target: $target, status: $status }'
+	} >> ${resultsdir}/build.json.in
+	# convert raw list to an array
+	jq -s . < ${resultsdir}/build.json.in > ${resultsdir}/build.json
+
+	if test "${status}" = failed ; then
 	    # force the next run to test HEAD++ using rebuilt and
 	    # updated domains; hopefully that will contain the fix (or
 	    # at least contain the damage).
 	    ${status} "${target} barfed, restarting with HEAD"
 	    exec $0 ${repodir} ${summarydir}
 	fi
+
     done
+
+    # Eliminate any files in the repo and the latest results directory
+    # that are identical.
+    #
+    # Trying to do much more than this exceeds either hardlink's
+    # internal cache of checksums (causing hardlink opportunities to
+    # be missed); or the kernel's file cache (causing catatonic
+    # performance).
+    #
+    # It is assumed that git, when switching checkouts, creates new
+    # files, and not modifies in-place.
+
+    ${status} "hardlink $(basename ${repodir}) $(${resultsdir})"
+    hardlink -v ${repodir} ${resultsdir}
+
 
     # Check that the test VMs are ok
     #

@@ -1,4 +1,4 @@
 # This is a reference to Ethernet:
-libreswan source: very-long-line-length-in-source-file lib/libswan/ip_protocol.c line 200 is 625 characters long (>512)
+libreswan source: very-long-line-length-in-source-file 626 > 512 [lib/libswan/ip_protocol.c:199]
 # testing configurations contain public keys, etc:
-libreswan source: very-long-line-length-in-source-file testing/*
+libreswan source: very-long-line-length-in-source-file * > 512 [testing/*]

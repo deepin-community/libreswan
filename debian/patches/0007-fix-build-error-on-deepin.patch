@@ -1,0 +1,25 @@
+From 20cb936d3a127da5f9b80d5e20185c8890cb7c6b Mon Sep 17 00:00:00 2001
+From: xzl <xiangzelong@deepin.org>
+Date: Fri, 12 Jan 2024 11:17:56 +0800
+Subject: [PATCH 1/1] fix-build-error-on-deepin
+
+---
+ mk/config.mk | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/mk/config.mk b/mk/config.mk
+index 2c6978f..66131ca 100644
+--- a/mk/config.mk
++++ b/mk/config.mk
+@@ -605,7 +605,7 @@ endif
+ # default/*.mk; look for auto-trust-anchor-file in unbound.conf.
+ 
+ USE_DNSSEC ?= true
+-# DEFAULT_DNSSEC_ROOTKEY_FILE=<unspecified>
++DEFAULT_DNSSEC_ROOTKEY_FILE=<unspecified>
+ 
+ ifeq ($(USE_DNSSEC),true)
+ USERLAND_CFLAGS += -DUSE_DNSSEC
+-- 
+2.43.0
+

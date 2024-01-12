@@ -40,6 +40,9 @@
 #include <getopt.h>
 #include <unistd.h>	/* for unlink(), write(), close(), access(), et.al. */
 
+#include "deltatime.h"
+#include "timescale.h"
+#include "lswversion.h"
 #include "lswconf.h"
 #include "lswfips.h"
 #include "lswnss.h"
@@ -49,9 +52,10 @@
 #include "server.h"
 #include "kernel.h"	/* needs connections.h */
 #include "log.h"
+#include "log_limiter.h"	/* for init_log_limiter() */
 #include "keys.h"
 #include "secrets.h"    /* for free_remembered_public_keys() */
-#include "rnd.h"
+#include "hourly.h"
 #include "fetch.h"
 #include "ipsecconf/confread.h"
 #include "crypto.h"
@@ -71,8 +75,9 @@
 #include "crypt_symkey.h"	/* for init_crypt_symkey() */
 #include "crl_queue.h"		/* for free_crl_queue() */
 #include "pending.h"		/* for init_pending() */
-#include "iface.h"		/* for use_interface() */
+#include "iface.h"		/* for pluto_listen; */
 #include "server_pool.h"
+#include "show.h"
 
 #ifndef IPSECDIR
 #define IPSECDIR "/etc/ipsec.d"
@@ -90,7 +95,7 @@
 #include "dnssec.h"
 #endif
 
-#ifdef HAVE_SECCOMP
+#ifdef USE_SECCOMP
 #include "pluto_seccomp.h"
 #endif
 
@@ -121,7 +126,7 @@ static char *conffile;
 static int pluto_nss_seedbits;
 static int nhelpers = -1;
 static bool do_dnssec = false;
-static char *pluto_dnssec_rootfile = NULL;
+static char *pluto_dnssec_rootkey_file = NULL;
 static char *pluto_dnssec_trusted = NULL;
 
 static char *ocsp_uri = NULL;
@@ -134,6 +139,9 @@ static int ocsp_cache_max_age = OCSP_DEFAULT_CACHE_MAX_AGE;
 
 static char *pluto_lock_filename = NULL;
 static bool pluto_lock_created = false;
+
+/* Overridden by virtual_private= in ipsec.conf */
+static char *virtual_private = NULL;
 
 void free_pluto_main(void)
 {
@@ -148,10 +156,11 @@ void free_pluto_main(void)
 	pfreeany(ocsp_trust_name);
 	pfreeany(curl_iface);
 	pfreeany(pluto_log_file);
-	pfreeany(pluto_dnssec_rootfile);
+	pfreeany(pluto_dnssec_rootkey_file);
 	pfreeany(pluto_dnssec_trusted);
 	pfreeany(rundir);
 	free_global_redirect_dests();
+	pfreeany(virtual_private);
 }
 
 /* string naming compile-time options that have interop implications */
@@ -159,9 +168,6 @@ static const char compile_time_interop_options[] = ""
 	" IKEv2"
 #ifdef USE_IKEv1
 	" IKEv1"
-#endif
-#ifdef KERNEL_BSDKAME
-	" BSDKAME"
 #endif
 #ifdef KERNEL_PFKEYV2
 	" PFKEYV2"
@@ -199,9 +205,9 @@ static const char compile_time_interop_options[] = ""
 	" (IPsec profile)"
 #endif
 #ifdef USE_NSS_KDF
-	" (NSS-PRF)"
+	" (NSS-KDF)"
 #else
-	" (native-PRF)"
+	" (native-KDF)"
 #endif
 #ifdef USE_DNSSEC
 	" DNSSEC"
@@ -216,7 +222,7 @@ static const char compile_time_interop_options[] = ""
 	" LABELED_IPSEC"
 	" (SELINUX)"
 #endif
-#ifdef HAVE_SECCOMP
+#ifdef USE_SECCOMP
 	" SECCOMP"
 #endif
 #ifdef HAVE_LIBCAP_NG
@@ -349,14 +355,21 @@ static struct starter_config *read_cfg_file(char *configfile, long longindex, st
  * Values passed in are expected to have been allocated using our
  * own functions.
  */
-static void set_cfg_string(char **target, char *value)
+
+static void replace_value(char **target, const char *value)
+{
+	pfreeany(*target);
+	*target = clone_str(value, __func__);
+}
+
+static void replace_when_cfg_setup(char **target, const struct starter_config *cfg,
+				   enum keyword_string_config_field field)
 {
 	/* Do nothing if value is unset. */
+	const char *value = cfg->setup.strings[field];
 	if (value == NULL || *value == '\0')
 		return;
-
-	/* Don't free previous target, it might be statically set. */
-	*target = clone_str(value, "(ignore) set_cfg_string item");
+	replace_value(target, value);
 }
 
 /*
@@ -446,9 +459,12 @@ uint16_t secctx_attr_type = SECCTX;
  * We never find that letting getopt set an option makes sense
  * so flag is always NULL.
  *
- * Trick: we split each "name" string with an explicit '\0'.
- * Before the '\0' is the option name, as seen by getopt_long.
- * After the '\0' is meta-information:
+ * Trick:
+ *
+ * Each "name" string is split by an explicit '\0'.  Before the '\0'
+ * is the option name, as seen by getopt_long.  After the '\0' is
+ * meta-information where:
+ *
  * - _ means: obsolete due to _ in name: replace _ with -
  * - > means: obsolete spelling; use spelling from rest of string
  * - ! means: obsolete and ignored (no replacement)
@@ -456,7 +472,6 @@ uint16_t secctx_attr_type = SECCTX;
  *   If it starts with ^, that means start a newline in the --help output.
  *
  * The table should be ordered to maximize the clarity of --help.
- *
  */
 
 enum {
@@ -501,16 +516,13 @@ static const struct option long_opts[] = {
 	{ "crlcheckinterval\0", required_argument, NULL, 'x' },
 	{ "uniqueids\0", no_argument, NULL, 'u' },
 	{ "no-dnssec\0", no_argument, NULL, 'R' },
-#ifdef KERNEL_BSDKAME
-	{ "use-bsdkame\0",   no_argument, NULL, 'F' },
-#endif
 #ifdef KERNEL_PFKEYV2
 	{ "use-pfkeyv2\0",   no_argument, NULL, 'P' },
 #endif
 #ifdef KERNEL_XFRM
 	{ "use-xfrm\0", no_argument, NULL, 'K' },
 #endif
-	{ "interface\0<ifname|ifaddr>", required_argument, NULL, 'i' },
+	{ "interface\0!<ifname|ifaddr>", required_argument, NULL, 'i' }, /* reserved; not implemented */
 	{ "curl-iface\0<ifname|ifaddr>", required_argument, NULL, 'Z' },
 	{ "curl-timeout\0<secs>", required_argument, NULL, 'I' },
 	{ "listen\0<ifaddr>", required_argument, NULL, 'L' },
@@ -538,7 +550,7 @@ static const struct option long_opts[] = {
 	{ "ikev1-secctx-attr-type\0<number>", required_argument, NULL, 'w' },
 	{ "ikev1-reject\0", no_argument, NULL, 'k' },
 	{ "ikev1-drop\0", no_argument, NULL, 'l' },
-#ifdef HAVE_SECCOMP
+#ifdef USE_SECCOMP
 	{ "seccomp-enabled\0", no_argument, NULL, '3' },
 	{ "seccomp-tolerant\0", no_argument, NULL, '4' },
 #endif
@@ -583,6 +595,13 @@ static void check_err(err_t ugh, int longindex, struct logger *logger)
 {
 	if (ugh != NULL) {
 		fatal_opt(longindex, logger, "%s", ugh);
+	}
+}
+
+static void check_diag(diag_t d, int longindex, struct logger *logger)
+{
+	if (d != NULL) {
+		fatal_opt(longindex, logger, "%s", str_diag(d));
 	}
 }
 
@@ -641,20 +660,16 @@ static void usage(FILE *stream)
 #ifdef USE_DNSSEC
 static void set_dnssec_file_names (struct starter_config *cfg)
 {
+	/*
+	 * The default config value is DEFAULT_DNSSEC_ROOTKEY_FILE,
+	 * and not NULL, so always replace; but only with something
+	 * non empty.
+	 */
+	pfreeany(pluto_dnssec_rootkey_file);
 	if (cfg->setup.strings[KSF_PLUTO_DNSSEC_ROOTKEY_FILE][0] != '\0') {
-		pfreeany(pluto_dnssec_rootfile);
-		set_cfg_string(&pluto_dnssec_rootfile,
-				cfg->setup.strings[KSF_PLUTO_DNSSEC_ROOTKEY_FILE]);
-	} else {
-		/* unset the global one config file unset it */
-		pfreeany(pluto_dnssec_rootfile);
-		pluto_dnssec_rootfile = NULL;
+		pluto_dnssec_rootkey_file = clone_str(cfg->setup.strings[KSF_PLUTO_DNSSEC_ROOTKEY_FILE], __func__);
 	}
-	if (cfg->setup.strings[KSF_PLUTO_DNSSEC_ANCHORS] != NULL &&
-			cfg->setup.strings[KSF_PLUTO_DNSSEC_ANCHORS][0] != '\0') {
-		set_cfg_string(&pluto_dnssec_trusted,
-				cfg->setup.strings[KSF_PLUTO_DNSSEC_ANCHORS]);
-	}
+	replace_when_cfg_setup(&pluto_dnssec_trusted, cfg, KSF_PLUTO_DNSSEC_ANCHORS);
 }
 #endif
 
@@ -722,14 +737,11 @@ int main(int argc, char **argv)
 	rundir = clone_str(DEFAULT_RUNDIR, "rundir");
 	pluto_vendorid = clone_str(ipsec_version_vendorid(), "vendorid in main()");
 #ifdef USE_DNSSEC
-	pluto_dnssec_rootfile = clone_str(DEFAULT_DNSSEC_ROOTKEY_FILE, "root.key file");
+	pluto_dnssec_rootkey_file = clone_str(DEFAULT_DNSSEC_ROOTKEY_FILE, "root.key file");
 #endif
 	pluto_lock_filename = clone_str(DEFAULT_RUNDIR "/pluto.pid", "lock file");
 
 	deltatime_t keep_alive = DELTATIME_INIT(0);
-
-	/* Overridden by virtual_private= in ipsec.conf */
-	char *virtual_private = NULL;
 
 	/* handle arguments */
 	for (;; ) {
@@ -867,20 +879,28 @@ int main(int argc, char **argv)
 			continue;
 
 		case 'g':	/* --logfile */
-			pluto_log_file = clone_str(optarg, "pluto_log_file");
+			replace_value(&pluto_log_file, optarg);
 			log_to_file_desired = true;
 			continue;
+
 #ifdef USE_DNSSEC
 		case OPT_DNSSEC_ROOTKEY_FILE:	/* --dnssec-rootkey-file */
+			/*
+			 * The default config value is
+			 * DEFAULT_DNSSEC_ROOTKEY_FILE, and not NULL,
+			 * so always replace; but only with something
+			 * non empty.
+			 */
+			pfreeany(pluto_dnssec_rootkey_file);
 			if (optarg[0] != '\0') {
-				pfree(pluto_dnssec_rootfile);
-				pluto_dnssec_rootfile = clone_str(optarg,
-						"dnssec_rootkey_file");
+				pluto_dnssec_rootkey_file = clone_str(optarg, "dnssec-rootkey-file");
 			}
 			continue;
+#endif  /* USE_DNSSEC */
 
+#ifdef USE_DNSSEC
 		case OPT_DNSSEC_TRUSTED:	/* --dnssec-trusted */
-			pluto_dnssec_trusted = clone_str(optarg, "pluto_dnssec_trusted");
+			replace_value(&pluto_dnssec_trusted, optarg);
 			continue;
 #endif  /* USE_DNSSEC */
 
@@ -923,21 +943,17 @@ int main(int argc, char **argv)
 				 */
 				llog(RC_LOG, logger,
 					    "invalid listen argument ignored: %s\n", e);
-			} else {
-				pluto_listen = clone_str(optarg, "pluto_listen");
-				llog(RC_LOG, logger,
-					    "bind() will be filtered for %s\n",
-					    pluto_listen);
+				continue;
 			}
+
+			replace_value(&pluto_listen, optarg);
+			llog(RC_LOG, logger,
+			     "bind() will be filtered for %s", pluto_listen);
 			continue;
 		}
 
 		case 'F':	/* --use-bsdkame */
-#ifdef KERNEL_BSDKAME
-			kernel_ops = &bsdkame_kernel_ops;
-#else
 			llog(RC_LOG, logger, "--use-bsdkame not supported");
-#endif
 			continue;
 
 		case 'P':	/* --use-pfkeyv2 */
@@ -963,7 +979,7 @@ int main(int argc, char **argv)
 			pluto_ddos_mode = DDOS_FORCE_UNLIMITED;
 			continue;
 
-#ifdef HAVE_SECCOMP
+#ifdef USE_SECCOMP
 		case '3':	/* --seccomp-enabled */
 			pluto_seccomp_mode = SECCOMP_ENABLED;
 			continue;
@@ -993,13 +1009,9 @@ int main(int argc, char **argv)
 			continue;
 
 		case 'x':	/* --crlcheckinterval <seconds> */
-		{
-			unsigned long u;
-			check_err(ttoulb(optarg, /*not lower-bound*/0, 10, (unsigned long) TIME_T_MAX, &u),
-				  longindex, logger);
-			crl_check_interval = deltatime(u);
+			check_diag(ttodeltatime(optarg, &crl_check_interval, &timescale_seconds),
+				   longindex, logger);
 			continue;
-		}
 
 		case 'o':
 			ocsp_strict = true;
@@ -1010,11 +1022,11 @@ int main(int argc, char **argv)
 			continue;
 
 		case 'Y':
-			ocsp_uri = clone_str(optarg, "ocsp_uri");
+			replace_value(&ocsp_uri, optarg);
 			continue;
 
 		case 'J':
-			ocsp_trust_name = clone_str(optarg, "ocsp_trust_name");
+			replace_value(&ocsp_trust_name, optarg);
 			continue;
 
 		case 'T':	/* --ocsp_timeout <seconds> */
@@ -1076,9 +1088,6 @@ int main(int argc, char **argv)
 			continue;
 
 		case 'i':	/* --interface <ifname|ifaddr> */
-			if (!use_interface(optarg)) {
-				fatal_opt(longindex, logger, "too many --interface specifications");
-			}
 			continue;
 
 		case '1':	/* --ike-socket-no-errqueue */
@@ -1186,30 +1195,29 @@ int main(int argc, char **argv)
 			continue;
 
 		case '6':	/* --virtual-private */
-			virtual_private = clone_str(optarg, "virtual_private");
+			replace_value(&virtual_private, optarg);
 			continue;
 
 		case 'z':	/* --config */
 		{
 			/*
-			 * Config struct to variables mapper. This will
-			 * overwrite all previously set options. Keep this
-			 * in the same order as long_opts[] is.
+			 * Config struct to variables mapper.  This
+			 * will overwrite all previously set options.
+			 * Keep this in the same order as long_opts[]
+			 * is.
 			 */
 			pfree(conffile);
 			conffile = clone_str(optarg, "conffile via getopt");
 			/* may not return */
 			struct starter_config *cfg = read_cfg_file(conffile, longindex, logger);
 
-			/* leak */
-			set_cfg_string(&pluto_log_file,
-				       cfg->setup.strings[KSF_LOGFILE]);
+			replace_when_cfg_setup(&pluto_log_file, cfg, KSF_LOGFILE);
+			if (pluto_log_file != NULL)
+				log_to_syslog = false;
 #ifdef USE_DNSSEC
 			set_dnssec_file_names(cfg);
 #endif
 
-			if (pluto_log_file != NULL)
-				log_to_syslog = false;
 			/* plutofork= no longer supported via config file */
 			log_param.log_with_timestamp = cfg->setup.options[KBF_LOGTIME];
 			log_append = cfg->setup.options[KBF_LOGAPPEND];
@@ -1224,7 +1232,7 @@ int main(int argc, char **argv)
 				pluto_ikev1_pol = GLOBAL_IKEv1_DROP;
 			}
 #endif
-#ifdef HAVE_SECCOMP
+#ifdef USE_SECCOMP
 			pluto_seccomp_mode = cfg->setup.options[KBF_SECCOMP];
 #endif
 			if (cfg->setup.options[KBF_FORCEBUSY]) {
@@ -1248,10 +1256,8 @@ int main(int argc, char **argv)
 			ocsp_cache_min_age = cfg->setup.options[KBF_OCSP_CACHE_MIN_AGE_MS] / 1000;
 			ocsp_cache_max_age = cfg->setup.options[KBF_OCSP_CACHE_MAX_AGE_MS] / 1000;
 
-			set_cfg_string(&ocsp_uri,
-				       cfg->setup.strings[KSF_OCSP_URI]);
-			set_cfg_string(&ocsp_trust_name,
-				       cfg->setup.strings[KSF_OCSP_TRUSTNAME]);
+			replace_when_cfg_setup(&ocsp_uri, cfg, KSF_OCSP_URI);
+			replace_when_cfg_setup(&ocsp_trust_name, cfg, KSF_OCSP_TRUSTNAME);
 
 			char *tmp_global_redirect = cfg->setup.strings[KSF_GLOBAL_REDIRECT];
 			if (tmp_global_redirect == NULL || streq(tmp_global_redirect, "no")) {
@@ -1274,12 +1280,11 @@ int main(int argc, char **argv)
 			do_dnssec = false;
 #endif
 			/*
-			 * We don't check interfaces= here because that part
-			 * has been dealt with in _stackmanager before we
-			 * started
+			 * We don't check interfaces= here because
+			 * that part has been dealt with in
+			 * _stackmanager before we started.
 			 */
-			set_cfg_string(&pluto_listen,
-				       cfg->setup.strings[KSF_LISTEN]);
+			replace_when_cfg_setup(&pluto_listen, cfg, KSF_LISTEN);
 
 			/* ike-socket-bufsize= */
 			pluto_sock_bufsize = cfg->setup.options[KBF_IKEBUF];
@@ -1293,8 +1298,10 @@ int main(int argc, char **argv)
 			/* only causes nflog nmber to show in ipsec status */
 			pluto_nflog_group = cfg->setup.options[KBF_NFLOG_ALL];
 
+#ifdef XFRM_LIFETIME_DEFAULT
 			/* only causes nflog nmber to show in ipsec status */
 			pluto_xfrmlifetime = cfg->setup.options[KBF_XFRMLIFETIME];
+#endif
 
 			/* no config option: rundir */
 			/* secretsfile= */
@@ -1352,8 +1359,7 @@ int main(int argc, char **argv)
 			pluto_nss_seedbits = cfg->setup.options[KBF_SEEDBITS];
 			keep_alive = deltatime(cfg->setup.options[KBF_KEEPALIVE]);
 
-			set_cfg_string(&virtual_private,
-				       cfg->setup.strings[KSF_VIRTUALPRIVATE]);
+			replace_when_cfg_setup(&virtual_private, cfg, KSF_VIRTUALPRIVATE);
 
 			set_global_redirect_dests(cfg->setup.strings[KSF_GLOBAL_REDIRECT_TO]);
 
@@ -1764,7 +1770,7 @@ int main(int argc, char **argv)
 	init_server(logger);
 
 	/* server initialized; timers can follow */
-	init_rate_log_timer();
+	init_log_limiter();
 	init_nat_traversal_timer(keep_alive, logger);
 	init_revival_timer();
 	init_connections_timer();
@@ -1804,7 +1810,7 @@ int main(int argc, char **argv)
 #ifdef USE_DNSSEC
 	{
 		diag_t d = unbound_event_init(get_pluto_event_base(), do_dnssec,
-					      pluto_dnssec_rootfile, pluto_dnssec_trusted,
+					      pluto_dnssec_rootkey_file, pluto_dnssec_trusted,
 					      logger/*for-warnings*/);
 		if (d != NULL) {
 			fatal_diag(PLUTO_EXIT_UNBOUND_FAIL, logger, &d, "%s", "");
@@ -1833,8 +1839,8 @@ void show_setup_plutomain(struct show *s)
 
 #ifdef USE_DNSSEC
 	show_comment(s, "dnssec-rootkey-file=%s, dnssec-trusted=%s",
-		pluto_dnssec_rootfile == NULL ? "<unset>" : pluto_dnssec_rootfile,
-		pluto_dnssec_trusted == NULL ? "<unset>" : pluto_dnssec_trusted);
+		     pluto_dnssec_rootkey_file == NULL ? "<unset>" : pluto_dnssec_rootkey_file,
+		     pluto_dnssec_trusted == NULL ? "<unset>" : pluto_dnssec_trusted);
 #endif
 
 	show_comment(s, "sbindir=%s, libexecdir=%s",
@@ -1846,18 +1852,17 @@ void show_setup_plutomain(struct show *s)
 		pluto_vendorid,
 		bool_str(log_to_audit));
 
-	show_comment(s,
-		"nhelpers=%d, uniqueids=%s, "
-		"dnssec-enable=%s, "
-		"logappend=%s, logip=%s, shuntlifetime=%jds, xfrmlifetime=%jds",
-		nhelpers,
-		bool_str(uniqueIDs),
-		bool_str(do_dnssec),
-		bool_str(log_append),
-		bool_str(log_ip),
-		deltasecs(pluto_shunt_lifetime),
-		(intmax_t) pluto_xfrmlifetime
-	);
+	SHOW_JAMBUF(RC_COMMENT, s, buf) {
+		jam(buf, "nhelpers=%d", nhelpers);
+		jam(buf, ", uniqueids=%s", bool_str(uniqueIDs));
+		jam(buf, ", dnssec-enable=%s", bool_str(do_dnssec));
+		jam(buf, ", logappend=%s", bool_str(log_append));
+		jam(buf, ", logip=%s", bool_str(log_ip));
+		jam(buf, ", shuntlifetime=%jds", deltasecs(pluto_shunt_lifetime));
+#ifdef XFRM_LIFETIME_DEFAULT
+		jam(buf, ", xfrmlifetime=%jds", (intmax_t) pluto_xfrmlifetime);
+#endif
+	}
 
 	show_comment(s,
 		"ddos-cookies-threshold=%d, ddos-max-halfopen=%d, ddos-mode=%s, ikev1-policy=%s",

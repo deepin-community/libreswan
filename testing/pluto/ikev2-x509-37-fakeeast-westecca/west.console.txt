@@ -47,7 +47,7 @@ initdone
 west #
  ipsec auto --up ikev2-westnet-eastnet-x509-cr
 1v2 "ikev2-westnet-eastnet-x509-cr" #1: initiating IKEv2 connection
-1v2 "ikev2-westnet-eastnet-x509-cr" #1: sent IKE_SA_INIT request
+1v2 "ikev2-westnet-eastnet-x509-cr" #1: sent IKE_SA_INIT request to 192.1.2.23:500
 1v2 "ikev2-westnet-eastnet-x509-cr" #1: sent IKE_AUTH request {cipher=AES_GCM_16_256 integ=n/a prf=HMAC_SHA2_512 group=MODP2048}
 003 "ikev2-westnet-eastnet-x509-cr" #1: NSS: ERROR: IPsec certificate E=user-east@testing.libreswan.org,CN=east.testing.libreswan.org,OU=Test Department,O=Libreswan,L=Toronto,ST=Ontario,C=CA invalid: SEC_ERROR_UNKNOWN_ISSUER: Peer's Certificate issuer is not recognized.
 002 "ikev2-westnet-eastnet-x509-cr" #1: X509: certificate payload rejected for this connection
@@ -64,7 +64,15 @@ XFRM state:
 XFRM policy:
 XFRM done
 IPSEC mangle TABLES
-NEW_IPSEC_CONN mangle TABLES
+iptables filter TABLE
+Chain INPUT (policy ACCEPT)
+target     prot opt source               destination         
+ACCEPT     all  --  0.0.0.0/0            0.0.0.0/0            policy match dir in pol ipsec
+DROP       all  --  192.0.2.0/24         0.0.0.0/0           
+Chain FORWARD (policy ACCEPT)
+target     prot opt source               destination         
+Chain OUTPUT (policy ACCEPT)
+target     prot opt source               destination         
 ROUTING TABLES
 default via 192.1.2.254 dev eth1
 192.0.1.0/24 dev eth0 proto kernel scope link src 192.0.1.254

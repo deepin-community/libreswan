@@ -13,7 +13,7 @@ west #
  ../../guestbin/libreswan-up-down.sh westnet-eastnet-ipv4-psk-ikev2 -I 192.0.1.254 192.0.2.254
 002 "westnet-eastnet-ipv4-psk-ikev2": added IKEv2 connection
 1v2 "westnet-eastnet-ipv4-psk-ikev2" #1: initiating IKEv2 connection
-1v2 "westnet-eastnet-ipv4-psk-ikev2" #1: sent IKE_SA_INIT request
+1v2 "westnet-eastnet-ipv4-psk-ikev2" #1: sent IKE_SA_INIT request to 192.1.2.23:500
 003 "westnet-eastnet-ipv4-psk-ikev2" #1: message response contained an unknown critical payload type (255??)
 031 "westnet-eastnet-ipv4-psk-ikev2" #1: STATE_V2_PARENT_I1: 60 second timeout exceeded after 0 retransmits.  No response (or no acceptable response) to our first IKEv2 message
 000 "westnet-eastnet-ipv4-psk-ikev2" #1: starting keying attempt 2 of an unlimited number, but releasing whack
@@ -29,7 +29,13 @@ XFRM state:
 XFRM policy:
 XFRM done
 IPSEC mangle TABLES
-NEW_IPSEC_CONN mangle TABLES
+iptables filter TABLE
+Chain INPUT (policy ACCEPT)
+target     prot opt source               destination         
+Chain FORWARD (policy ACCEPT)
+target     prot opt source               destination         
+Chain OUTPUT (policy ACCEPT)
+target     prot opt source               destination         
 ROUTING TABLES
 default via 192.1.2.254 dev eth1
 192.0.1.0/24 dev eth0 proto kernel scope link src 192.0.1.254

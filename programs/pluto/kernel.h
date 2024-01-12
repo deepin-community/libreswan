@@ -49,29 +49,22 @@ struct show;
  * limited to appropriate source and destination addresses.
  */
 
-enum kernel_policy_ops {
-	/* three bits */
-	KERNEL_POLICY_ADD = 1,
-	KERNEL_POLICY_DELETE = 2,
-	KERNEL_POLICY_REPLACE = 4,
-};
-
-enum kernel_policy_dir {
-	/* two bits */
-	KERNEL_POLICY_INBOUND = 8,
-	KERNEL_POLICY_OUTBOUND = 16,
-};
-
 enum kernel_policy_op {
-	KP_ADD_OUTBOUND =     (KERNEL_POLICY_ADD    |KERNEL_POLICY_OUTBOUND),
-	KP_ADD_INBOUND =      (KERNEL_POLICY_ADD    |KERNEL_POLICY_INBOUND),
-	KP_DELETE_OUTBOUND =  (KERNEL_POLICY_DELETE |KERNEL_POLICY_OUTBOUND),
-	KP_DELETE_INBOUND =   (KERNEL_POLICY_DELETE |KERNEL_POLICY_INBOUND),
-	KP_REPLACE_OUTBOUND = (KERNEL_POLICY_REPLACE|KERNEL_POLICY_OUTBOUND),
-	KP_REPLACE_INBOUND =  (KERNEL_POLICY_REPLACE|KERNEL_POLICY_INBOUND),
+	/* three bits */
+	KERNEL_POLICY_OP_ADD = 1,
+	KERNEL_POLICY_OP_DELETE = 2,
+	KERNEL_POLICY_OP_REPLACE = 4,
 };
 
 extern const struct enum_names kernel_policy_op_names;
+
+enum kernel_policy_dir {
+	/* two bits */
+	KERNEL_POLICY_DIR_INBOUND = 8,
+	KERNEL_POLICY_DIR_OUTBOUND = 16,
+};
+
+extern const struct enum_names kernel_policy_dir_names;
 
 /*
  * The protocol used to encapsulate.
@@ -155,45 +148,49 @@ struct kernel_policy_rule {
 	reqid_t reqid;
 };
 
+struct kernel_policy_end {
+	/*
+	 * The SRC/DST selectors of the policy.  This is what captures
+	 * the packets so they can be put through the wringer, er,
+	 * rules listed below.
+	 */
+	ip_selector client;
+	/*
+	 * The route addresses of the encapsulated packets.
+	 *
+	 * With pfkey and transport mode with nat-traversal we need to
+	 * change the remote IPsec SA to point to external ip of the
+	 * peer.  Here we substitute real client ip with NATD ip.
+	 *
+	 * Bug #1004 fix.
+	 *
+	 * There really isn't "client" with XFRM and transport mode so
+	 * eroute must be done to natted, visible ip. If we don't hide
+	 * internal IP, communication doesn't work.
+	 *
+	 * XXX: old comment?
+	 */
+	ip_selector route;
+	/*
+	 * The src/dst addresses of the encapsulated packet that are
+	 * to go across the public network.
+	 *
+	 * All rules should use these values?
+	 *
+	 * With setkey and transport mode, they can be unset; but
+	 * libreswan doesn't do that.  Actually they can be IPv[46]
+	 * UNSPEC and libreswan does that because XFRM insists on it.
+	 */
+	ip_address host;
+};
+
 struct kernel_policy {
-	struct {
-		/*
-		 * The SRC/DST selectors of the policy.  This is what
-		 * captures the packets so they can be put through the
-		 * wringer, er, rules listed below.
-		 */
-		ip_selector client;
-		/*
-		 * The route addresses of the encapsulated packets.
-		 *
-		 * With pfkey and transport mode with nat-traversal we
-		 * need to change the remote IPsec SA to point to
-		 * external ip of the peer.  Here we substitute real
-		 * client ip with NATD ip.
-		 *
-		 * Bug #1004 fix.
-		 *
-		 * There really isn't "client" with XFRM and transport
-		 * mode so eroute must be done to natted, visible
-		 * ip. If we don't hide internal IP, communication
-		 * doesn't work.
-		 *
-		 * XXX: old comment?
-		 */
-		ip_selector route;
-		/*
-		 * The src/dst addresses of the encapsulated packet
-		 * that are to go across the public network.
-		 *
-		 * All rules should use these values?
-		 *
-		 * With setkey and transport mode, they can be unset;
-		 * but libreswan doesn't do that.  Actually they can
-		 * be IPv[46] UNSPEC and libreswan does that because
-		 * XFRM insists on it.
-		 */
-		ip_address host;
-	} src, dst;
+	/*
+	 * The src/dst selector and src/dst host (and apparently
+	 * route).
+	 */
+	struct kernel_policy_end src;
+	struct kernel_policy_end dst;
 	/*
 	 * Index from 1; RULE[0] is always empty; so .nr_rules==0
 	 * implies no rules.
@@ -209,36 +206,17 @@ struct kernel_policy {
 	 */
 	enum encap_mode mode;
 	unsigned nr_rules;
-	struct kernel_policy_rule rule[5]; /* [0]+AH+ESP+COMP+0 */
+	struct kernel_policy_rule rule[5]; /* [0]+IPCOMP+AH+ESP+0 */
 };
 
 struct kernel_policy bare_kernel_policy(const ip_selector *src,
 					const ip_selector *dst);
 
 /*
- * Replaces SADB_X_SATYPE_* for non-KLIPS code. Assumes normal
- * SADB_SATYPE values
- *
- * XXX: Seems largely redundant.  Only place that eroute and
- * ip_protocol have different "values" is when netkey is inserting a
- * shunt - and that looks like a bug.
- */
-enum eroute_type {
-	ET_UNSPEC = 0,
-	ET_AH    = 51,	/* SA_AH,      (51)  authentication */
-	ET_ESP   = 50,	/* SA_ESP,     (50)  encryption/auth */
-	ET_IPCOMP= 108,	/* SA_COMP,    (108) compression */
-	ET_INT   = 61,	/* SA_INT,     (61)  internal type */
-	ET_IPIP  = 4,	/* SA_IPIP,    (4)   turn on tunnel type */
-};
-#define esatype2proto(X) ((int)(X))
-#define proto2esatype(X) ((enum eroute_type)(X))
-
-/*
  * The CHILD (IPsec, kernel) SA has two IP ends.
  */
 
-struct kernel_end {
+struct kernel_state_end {
 	/*
 	 * For ESP/AH which is carried by raw IP packets, only an
 	 * address is needed to identify an end.  However when
@@ -246,13 +224,13 @@ struct kernel_end {
 	 *
 	 * XXX: why is this a pointer and not simply the value?
 	 */
-	const ip_address *address;
+	ip_address address;
 	int encap_port;
 	/*
 	 * This is not the subnet you're looking for: the transport
 	 * selector or packet filter.
 	 */
-	const ip_selector *client;
+	ip_selector client;
 	/*
 	 * XXX: for mobike? does this need a port or is the port
 	 * optional or unchanging? perhaps the port is assumed to be
@@ -262,8 +240,8 @@ struct kernel_end {
 };
 
 struct kernel_sa {
-	struct kernel_end src;
-	struct kernel_end dst;
+	struct kernel_state_end src;
+	struct kernel_state_end dst;
 
 	/*
 	 * Is the stack using tunnel mode; and if it is does this SA
@@ -283,9 +261,8 @@ struct kernel_sa {
 	bool nopmtudisc;
 	uint32_t tfcpad;
 	ipsec_spi_t spi;
-	const struct ip_protocol *proto;
-	unsigned int transport_proto;
-	enum eroute_type esatype;
+	const struct ip_protocol *proto;	/* ESP, AH, IPCOMP */
+	const struct ip_encap *encap_type;	/* ESP-in-TCP, ESP-in-UDP; or NULL */
 	unsigned replay_window;
 	reqid_t reqid;
 
@@ -298,7 +275,6 @@ struct kernel_sa {
 	unsigned enckeylen;
 	unsigned char *enckey;
 
-	const struct ip_encap *encap_type;		/* ESP in TCP or UDP; or NULL */
 	ip_address *natt_oa;
 	const char *story;
 	chunk_t sec_label;
@@ -306,7 +282,10 @@ struct kernel_sa {
 	const char *nic_offload_dev;
 	uint32_t xfrm_if_id;
 	struct sa_mark mark_set; /* config keyword mark-out */
-
+	uint64_t sa_ipsec_max_bytes;
+	uint64_t sa_max_soft_bytes;
+	uint64_t sa_ipsec_max_packets;
+	uint64_t sa_max_soft_packets;
 	deltatime_t sa_lifetime; /* number of seconds until SA expires */
 };
 
@@ -372,7 +351,7 @@ struct kernel_ops {
 	bool overlap_supported;
 	bool sha2_truncbug_support;
 	bool esn_supported;
-	int replay_window;
+	uintmax_t max_replay_window;
 	int *async_fdp;
 	int *route_fdp;
 
@@ -381,6 +360,7 @@ struct kernel_ops {
 	void (*process_queue)(void);
 	void (*process_msg)(int, struct logger *);
 	bool (*raw_policy)(enum kernel_policy_op op,
+			   enum kernel_policy_dir dir,
 			   enum expect_kernel_policy expect_kernel_policy,
 			   const ip_selector *src_client,
 			   const ip_selector *dst_client,
@@ -424,7 +404,6 @@ struct kernel_ops {
 				     const ip_address *src,
 				     const ip_address *dst,
 				     const struct ip_protocol *proto,
-				     bool tunnel_mode,
 				     reqid_t reqid,
 				     uintmax_t min, uintmax_t max,
 				     const char *story,	/* often SAID string */
@@ -436,11 +415,10 @@ struct kernel_ops {
 			      const char *story,	/* often SAID string */
 			      struct logger *logger);
 
-	bool (*exceptsocket)(int socketfd, int family, struct logger *logger);
 	err_t (*migrate_sa_check)(struct logger *);
 	bool (*migrate_ipsec_sa)(struct child_sa *child);
 	void (*v6holes)(struct logger *logger);
-	bool (*poke_ipsec_policy_hole)(const struct iface_dev *ifd, int fd, struct logger *logger);
+	bool (*poke_ipsec_policy_hole)(int fd, const struct ip_info *afi, struct logger *logger);
 	bool (*detect_offload)(const struct raw_iface *ifp, struct logger *logger);
 };
 
@@ -449,9 +427,6 @@ extern int create_socket(const struct raw_iface *ifp, const char *v_name, int po
 extern const struct kernel_ops *kernel_ops;
 #ifdef KERNEL_XFRM
 extern const struct kernel_ops xfrm_kernel_ops;
-#endif
-#ifdef KERNEL_BSDKAME
-extern const struct kernel_ops bsdkame_kernel_ops;
 #endif
 #ifdef KERNEL_PFKEYV2
 extern const struct kernel_ops pfkeyv2_kernel_ops;
@@ -527,14 +502,11 @@ extern bool orphan_holdpass(const struct connection *c, struct spd_route *sr,
 
 extern enum policy_spi shunt_policy_spi(enum shunt_policy);
 
-struct state;   /* forward declaration of tag */
 extern ipsec_spi_t get_ipsec_spi(ipsec_spi_t avoid,
 				 const struct ip_protocol *proto,
 				 const struct spd_route *sr,
-				 bool tunnel_mode,
 				 struct logger *logger);
-extern ipsec_spi_t get_my_cpi(const struct spd_route *sr, bool tunnel_mode,
-			      struct logger *logger);
+extern ipsec_spi_t get_ipsec_cpi(const struct spd_route *sr, struct logger *logger);
 
 extern bool install_inbound_ipsec_sa(struct state *st);
 extern bool install_ipsec_sa(struct state *st, bool inbound_also);
@@ -563,5 +535,6 @@ bool install_sec_label_connection_policies(struct connection *c, struct logger *
 extern deltatime_t bare_shunt_interval;
 
 extern bool kernel_ops_detect_offload(const struct raw_iface *ifp, struct logger *logger);
-
+extern void handle_sa_expire(ipsec_spi_t spi, uint8_t protoid, ip_address *dst,
+		      bool hard, uint64_t bytes, uint64_t packets, uint64_t add_time);
 #endif

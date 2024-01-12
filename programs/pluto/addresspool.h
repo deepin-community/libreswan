@@ -15,19 +15,19 @@
  * for more details.
  */
 
-#ifndef _ADDRESSPOOL_H
-#define _ADDRESSPOOL_H
+#ifndef ADDRESSPOOL_H
+#define ADDRESSPOOL_H
 
 #include "err.h"
+#include "ip_range.h"
 
-struct ip_range;
-struct ip_pool;        /* forward declaration; definition is local to addresspool.c */
+struct addresspool;        /* abstract object */
 
-diag_t install_addresspool(const ip_range pool_range, struct ip_pool **pool) MUST_USE_RESULT;
-diag_t find_addresspool(const ip_range pool_range, struct ip_pool **pool) MUST_USE_RESULT;
+diag_t find_addresspool(const ip_range pool_range, struct addresspool **pool) MUST_USE_RESULT;
 
-extern void unreference_addresspool(struct connection *c);
-extern void reference_addresspool(struct connection *c);
+diag_t install_addresspool(const ip_range pool_range, struct connection *c) MUST_USE_RESULT;
+void addresspool_delref(struct addresspool **pool);
+struct addresspool *addresspool_addref(struct addresspool *pool);
 
 extern err_t lease_that_address(struct connection *c, const struct state *st);
 extern void free_that_address_lease(struct connection *c);

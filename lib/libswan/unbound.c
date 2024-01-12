@@ -252,9 +252,9 @@ bool unbound_resolve(char *src, const struct ip_info *afi,
 	}
 
 	if (result->bogus) {
-		llog(RC_LOG, logger,
-			    "ERROR: %s failed DNSSEC validation!",
-			    result->qname);
+		llog_error(logger, 0/*no-errno*/,
+			   "%s failed DNSSEC validation",
+			   result->qname);
 		ub_resolve_free(result);
 		return false;
 	}
@@ -305,7 +305,7 @@ bool unbound_resolve(char *src, const struct ip_info *afi,
 		return false;
 	}
 
-	struct ip_bytes bytes = unset_bytes;
+	struct ip_bytes bytes = unset_ip_bytes;
 	memcpy(bytes.byte, result->data[0], afi->ip_size);
 	*ipaddr = address_from_raw(HERE, afi->ip_version, bytes);
 	dbg("success for %s lookup", afi->ip_name);

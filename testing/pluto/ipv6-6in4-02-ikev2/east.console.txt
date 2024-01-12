@@ -12,7 +12,7 @@ east #
 initdone
 east #
  ipsec whack --trafficstatus
-006 #2: "westnet-eastnet-6in4", type=ESP, add_time=1234567890, inBytes=416, outBytes=416, id='@west'
+006 #2: "westnet-eastnet-6in4", type=ESP, add_time=1234567890, inBytes=416, outBytes=416, maxBytes=2^63B, id='@west'
 east #
  ip xfrm state
 src 192.1.2.45 dst 192.1.2.23
@@ -45,6 +45,18 @@ src 2001:db8:0:1::/64 dst 2001:db8:0:2::/64
 	dir in priority PRIORITY ptype main 
 	tmpl src 192.1.2.45 dst 192.1.2.23
 		proto esp reqid REQID mode tunnel
+src ::/0 dst ::/0 
+	socket out priority 0 ptype main 
+src ::/0 dst ::/0 
+	socket in priority 0 ptype main 
+src ::/0 dst ::/0 
+	socket out priority 0 ptype main 
+src ::/0 dst ::/0 
+	socket in priority 0 ptype main 
+src ::/0 dst ::/0 
+	socket out priority 0 ptype main 
+src ::/0 dst ::/0 
+	socket in priority 0 ptype main 
 src ::/0 dst ::/0 
 	socket out priority 0 ptype main 
 src ::/0 dst ::/0 

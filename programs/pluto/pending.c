@@ -53,6 +53,7 @@
 #include "host_pair.h"
 #include "ikev2_create_child_sa.h"		/* for initiate_v2_CREATE_CHILD_SA_create_child() */
 #include "initiate.h"
+#include "show.h"
 
 /*
  * queue an IPsec SA negotiation pending completion of a
@@ -391,7 +392,7 @@ static bool pending_check_timeout(const struct connection *c)
 		if (deltasecs(c->config->dpd.timeout) > 0) {
 			if (!monobefore(mononow(),
 				monotime_add(p->pend_time,
-					deltatimescale(3, 1, c->config->dpd.timeout)))) {
+					     deltatime_scale(c->config->dpd.timeout, 3, 1)))) {
 				connection_buf cib;
 				dbg("connection "PRI_CONNECTION" stuck, restarting",
 				    pri_connection(c, &cib));

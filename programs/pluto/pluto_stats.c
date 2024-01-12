@@ -25,7 +25,6 @@
 #include <errno.h>
 
 #include "sysdep.h"
-#include "socketwrapper.h"
 #include "constants.h"
 #include "defs.h"
 #include "state.h"
@@ -38,6 +37,8 @@
 #include "ike_alg.h"
 #include "pluto_stats.h"
 #include "nat_traversal.h"
+#include "show.h"
+
 
 unsigned long pstats_ipsec_sa;
 unsigned long pstats_ikev1_sa;

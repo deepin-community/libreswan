@@ -1,16 +1,18 @@
 #!/bin/sh
 
-set -ex
+set -xe ; exec < /dev/null
 
 GATEWAY=@@GATEWAY@@
 POOLDIR=@@POOLDIR@@
 SOURCEDIR=@@SOURCEDIR@@
 TESTINGDIR=@@TESTINGDIR@@
+PREFIX=@@PREFIX@@
 
 echo GATEWAY=${GATEWAY}
 echo POOLDIR=${POOLDIR}
 echo SOURCEDIR=${SOURCEDIR}
 echo TESTINGDIR=${TESTINGDIR}
+
 
 # update /etc/fstab with current /source and /testing
 mkdir -p /pool /source /testing
@@ -22,13 +24,15 @@ EOF
 mv /tmp/fstab /etc/fstab
 
 # change ROOT's shell to BASH
+#
+# Test scripts assume an SH like shell; but FreeBSD defaults to CSH.
+
 chsh -s /usr/local/bin/bash root
+cp -v /pool/${PREFIX}freebsd.bash_profile /root/.bash_profile
 
 # supress motd
 touch /root/.hushlogin
 
-# mount testing to get more files
-mount /testing
-cp /testing/libvirt/freebsd/rc.conf /etc
+cp -v /pool/${PREFIX}freebsd.rc.conf /etc/rc.conf
 
 exit 0

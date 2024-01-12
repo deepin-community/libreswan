@@ -207,10 +207,9 @@ static struct pbs_out open_v2_message_body(struct pbs_out *message,
 	}
 
 	struct pbs_out body;
-	diag_t d = pbs_out_struct(message, &isakmp_hdr_desc, &hdr, sizeof(hdr), &body);
-	if (d != NULL) {
-		llog_diag(RC_LOG_SERIOUS, ike->sa.st_logger, &d, "%s", "");
-		return empty_pbs;
+	if (!pbs_out_struct(message, &isakmp_hdr_desc, &hdr, sizeof(hdr), &body)) {
+		/* already logged */
+		return empty_pbs; /*fatal*/
 	}
 	if (impair.add_unknown_v2_payload_to == exchange_type &&
 	    !emit_v2UNKNOWN("request", exchange_type, &body)) {
@@ -231,10 +230,9 @@ static bool emit_v2SK_iv(struct v2SK_payload *sk)
 	/* compute location/size */
 	sk->iv = chunk2(sk->pbs.cur, sk->ike->sa.st_oakley.ta_encrypt->wire_iv_size);
 	/* make space */
-	diag_t d = pbs_out_zero(&sk->pbs, sk->iv.len, "IV");
-	if (d != NULL) {
-		llog_diag(RC_LOG_SERIOUS, sk->logger, &d, "%s", "");
-		return false;
+	if (!pbs_out_zero(&sk->pbs, sk->iv.len, "IV")) {
+		/* already logged */
+		return false; /*fatal*/
 	}
 	/* scribble on it */
 	fill_rnd_chunk(sk->iv);
@@ -308,12 +306,9 @@ static bool close_v2SK_payload(struct v2SK_payload *sk)
 	dbg("adding %zd bytes of padding (including 1 byte padding-length)",
 	    padding);
 	for (unsigned i = 0; i < padding; i++) {
-		diag_t d = pbs_out_repeated_byte(&sk->pbs, i, 1, "padding and length");
-		if (d != NULL) {
-			llog_diag(RC_LOG_SERIOUS, sk->logger, &d,
-				 "error initializing padding for encrypted %s payload: ",
-				 sk->pbs.container->name);
-			return false;
+		if (!pbs_out_repeated_byte(&sk->pbs, i, 1, "padding and length")) {
+			/* already logged */
+			return false; /*fatal*/
 		}
 	}
 
@@ -329,10 +324,9 @@ static bool close_v2SK_payload(struct v2SK_payload *sk)
 		return false;
 	}
 	sk->integrity = chunk2(sk->pbs.cur, integ_size);
-	diag_t d = pbs_out_zero(&sk->pbs, integ_size, "length of truncated HMAC/KEY");
-	if (d != NULL) {
-		llog_diag(RC_LOG_SERIOUS, sk->logger, &d, "%s", "");
-		return false;
+	if (!pbs_out_zero(&sk->pbs, integ_size, "length of truncated HMAC/KEY")) {
+		/* already logged */
+		return false; /*fatal*/
 	}
 
 	/* close the SK payload */

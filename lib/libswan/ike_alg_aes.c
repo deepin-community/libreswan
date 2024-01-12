@@ -42,8 +42,13 @@ const struct encrypt_desc ike_alg_encrypt_aes_cbc = {
 			[IKEv1_OAKLEY_ID] = OAKLEY_AES_CBC,
 			[IKEv1_ESP_ID] = ESP_AES,
 			[IKEv2_ALG_ID] = IKEv2_ENCR_AES_CBC,
+#if defined SADB_X_EALG_AES
+			[SADB_ALG_ID] = SADB_X_EALG_AES, /* Orig, NetBSD, FreeBSD */
+#elif defined SADB_X_EALG_AESCBC
+			[SADB_ALG_ID] = SADB_X_EALG_AESCBC,  /* also FreeBSD; ulgh */
+#endif
 		},
-		.fips = true,
+		.fips.approved = true,
 	},
 	.nss = {
 		.mechanism = CKM_AES_CBC,
@@ -54,11 +59,6 @@ const struct encrypt_desc ike_alg_encrypt_aes_cbc = {
 	.keydeflen =    AES_KEY_DEF_LEN,
 	.key_bit_lengths = { 256, 192, 128, },
 	.encrypt_ops = &ike_alg_encrypt_nss_cbc_ops,
-#if defined SADB_X_EALG_AES
-	.encrypt_sadb_ealg_id = SADB_X_EALG_AES, /* Orig, NetBSD, FreeBSD */
-#elif defined SADB_X_EALG_AESCBC
-	.encrypt_sadb_ealg_id = SADB_X_EALG_AESCBC,  /* also FreeBSD; ulgh */
-#endif
 	.encrypt_netlink_xfrm_name = "aes",
 	.encrypt_tcpdump_name = "aes",
 	.encrypt_ike_audit_name = "aes",
@@ -75,8 +75,11 @@ const struct encrypt_desc ike_alg_encrypt_aes_ctr =
 			[IKEv1_OAKLEY_ID] = OAKLEY_AES_CTR,
 			[IKEv1_ESP_ID] = ESP_AES_CTR,
 			[IKEv2_ALG_ID] = IKEv2_ENCR_AES_CTR,
+#ifdef SADB_X_EALG_AESCTR
+			[SADB_ALG_ID] = SADB_X_EALG_AESCTR,
+#endif
 		},
-		.fips = true,
+		.fips.approved = true,
 	},
 	.nss = {
 		.mechanism = CKM_AES_CTR,
@@ -88,9 +91,6 @@ const struct encrypt_desc ike_alg_encrypt_aes_ctr =
 	.keydeflen =    AES_KEY_DEF_LEN,
 	.key_bit_lengths = { 256, 192, 128, },
 	.encrypt_ops = &ike_alg_encrypt_nss_ctr_ops,
-#ifdef SADB_X_EALG_AESCTR
-	.encrypt_sadb_ealg_id = SADB_X_EALG_AESCTR,
-#endif
 	.encrypt_netlink_xfrm_name = "rfc3686(ctr(aes))",
 	.encrypt_tcpdump_name = "aes_ctr",
 	.encrypt_ike_audit_name = "aes_ctr",
@@ -108,8 +108,18 @@ const struct encrypt_desc ike_alg_encrypt_aes_gcm_8 =
 			[IKEv1_OAKLEY_ID] = -1,
 			[IKEv1_ESP_ID] = ESP_AES_GCM_8,
 			[IKEv2_ALG_ID] = IKEv2_ENCR_AES_GCM_8,
+#ifdef SADB_X_EALG_AES_GCM_ICV8
+			[SADB_ALG_ID] = SADB_X_EALG_AES_GCM_ICV8,
+#endif
+#ifdef SADB_X_EALG_AES_GCM8
+			[SADB_ALG_ID] = SADB_X_EALG_AES_GCM8,
+#endif
+#ifdef SADB_X_EALG_AESGCM8
+			[SADB_ALG_ID] = SADB_X_EALG_AESGCM8, /* NetBSD */
+#endif
 		},
-		.fips = true,
+		.fips.approved = true,
+		.fips.operation_limit = UINTMAX_C(1) << 32,
 	},
 	.nss = {
 		.mechanism = CKM_AES_GCM,
@@ -122,15 +132,6 @@ const struct encrypt_desc ike_alg_encrypt_aes_gcm_8 =
 	.key_bit_lengths = { 256, 192, 128, },
 	.aead_tag_size = 8,
 	.encrypt_ops = &ike_alg_encrypt_nss_gcm_ops,
-#ifdef SADB_X_EALG_AES_GCM_ICV8
-	.encrypt_sadb_ealg_id = SADB_X_EALG_AES_GCM_ICV8,
-#endif
-#ifdef SADB_X_EALG_AES_GCM8
-	.encrypt_sadb_ealg_id = SADB_X_EALG_AES_GCM8,
-#endif
-#ifdef SADB_X_EALG_AESGCM8
-	.encrypt_sadb_ealg_id = SADB_X_EALG_AESGCM8, /* NetBSD */
-#endif
 	.encrypt_netlink_xfrm_name = "rfc4106(gcm(aes))",
 	.encrypt_tcpdump_name = "aes_gcm",
 	.encrypt_ike_audit_name = "aes_gcm",
@@ -147,8 +148,18 @@ const struct encrypt_desc ike_alg_encrypt_aes_gcm_12 =
 			[IKEv1_OAKLEY_ID] = -1,
 			[IKEv1_ESP_ID] = ESP_AES_GCM_12,
 			[IKEv2_ALG_ID] = IKEv2_ENCR_AES_GCM_12,
+#ifdef SADB_X_EALG_AES_GCM_ICV12
+			[SADB_ALG_ID] = SADB_X_EALG_AES_GCM_ICV12,
+#endif
+#ifdef SADB_X_EALG_AES_GCM12
+			[SADB_ALG_ID] = SADB_X_EALG_AES_GCM12,
+#endif
+#ifdef SADB_X_EALG_AESGCM12
+			[SADB_ALG_ID] = SADB_X_EALG_AESGCM12, /* NetBSD */
+#endif
 		},
-		.fips = true,
+		.fips.approved = true,
+		.fips.operation_limit = UINTMAX_C(1) << 32,
 	},
 	.nss = {
 		.mechanism = CKM_AES_GCM,
@@ -161,15 +172,6 @@ const struct encrypt_desc ike_alg_encrypt_aes_gcm_12 =
 	.key_bit_lengths = { 256, 192, 128, },
 	.aead_tag_size = 12,
 	.encrypt_ops = &ike_alg_encrypt_nss_gcm_ops,
-#ifdef SADB_X_EALG_AES_GCM_ICV12
-	.encrypt_sadb_ealg_id = SADB_X_EALG_AES_GCM_ICV12,
-#endif
-#ifdef SADB_X_EALG_AES_GCM12
-	.encrypt_sadb_ealg_id = SADB_X_EALG_AES_GCM12,
-#endif
-#ifdef SADB_X_EALG_AESGCM12
-	.encrypt_sadb_ealg_id = SADB_X_EALG_AESGCM12, /* NetBSD */
-#endif
 	.encrypt_netlink_xfrm_name = "rfc4106(gcm(aes))",
 	.encrypt_tcpdump_name = "aes_gcm_12",
 	.encrypt_ike_audit_name = "aes_gcm_12",
@@ -187,8 +189,18 @@ const struct encrypt_desc ike_alg_encrypt_aes_gcm_16 =
 			[IKEv1_OAKLEY_ID] = -1,
 			[IKEv1_ESP_ID] = ESP_AES_GCM_16,
 			[IKEv2_ALG_ID] = IKEv2_ENCR_AES_GCM_16,
+#ifdef SADB_X_EALG_AES_GCM_ICV16
+			[SADB_ALG_ID] = SADB_X_EALG_AES_GCM_ICV16,
+#endif
+#ifdef SADB_X_EALG_AES_GCM16
+			[SADB_ALG_ID] = SADB_X_EALG_AES_GCM16,
+#endif
+#ifdef SADB_X_EALG_AESGCM16
+			[SADB_ALG_ID] = SADB_X_EALG_AESGCM16, /* NetBSD */
+#endif
 		},
-		.fips = true,
+		.fips.approved = true,
+		.fips.operation_limit = UINTMAX_C(1) << 32,
 	},
 	.nss = {
 		.mechanism = CKM_AES_GCM,
@@ -201,15 +213,6 @@ const struct encrypt_desc ike_alg_encrypt_aes_gcm_16 =
 	.key_bit_lengths = { 256, 192, 128, },
 	.aead_tag_size = 16,
 	.encrypt_ops = &ike_alg_encrypt_nss_gcm_ops,
-#ifdef SADB_X_EALG_AES_GCM_ICV16
-	.encrypt_sadb_ealg_id = SADB_X_EALG_AES_GCM_ICV16,
-#endif
-#ifdef SADB_X_EALG_AES_GCM16
-	.encrypt_sadb_ealg_id = SADB_X_EALG_AES_GCM16,
-#endif
-#ifdef SADB_X_EALG_AESGCM16
-	.encrypt_sadb_ealg_id = SADB_X_EALG_AESGCM16, /* NetBSD */
-#endif
 	.encrypt_netlink_xfrm_name = "rfc4106(gcm(aes))",
 	.encrypt_tcpdump_name = "aes_gcm_16",
 	.encrypt_ike_audit_name = "aes_gcm_16",
@@ -233,8 +236,11 @@ const struct encrypt_desc ike_alg_encrypt_aes_ccm_8 =
 			[IKEv1_OAKLEY_ID] = -1,
 			[IKEv1_ESP_ID] = ESP_AES_CCM_8,
 			[IKEv2_ALG_ID] = IKEv2_ENCR_AES_CCM_8,
+#ifdef SADB_X_EALG_AES_CCM_ICV8
+			[SADB_ALG_ID] = SADB_X_EALG_AES_CCM_ICV8,
+#endif
 		},
-		.fips = true,
+		.fips.approved = true,
 	},
 	.enc_blocksize =  AES_BLOCK_SIZE,
 	.salt_size = 3,
@@ -244,9 +250,6 @@ const struct encrypt_desc ike_alg_encrypt_aes_ccm_8 =
 	.keydeflen =      AEAD_AES_KEY_DEF_LEN,
 	.key_bit_lengths = { 256, 192, 128, },
 	.aead_tag_size = 8,
-#ifdef SADB_X_EALG_AES_CCM_ICV8
-	.encrypt_sadb_ealg_id = SADB_X_EALG_AES_CCM_ICV8,
-#endif
 	.encrypt_netlink_xfrm_name = "rfc4309(ccm(aes))",
 	.encrypt_tcpdump_name = "aes_ccm_8",
 	.encrypt_ike_audit_name = "aes_ccm_8",
@@ -263,8 +266,11 @@ const struct encrypt_desc ike_alg_encrypt_aes_ccm_12 =
 			[IKEv1_OAKLEY_ID] = -1,
 			[IKEv1_ESP_ID] = ESP_AES_CCM_12,
 			[IKEv2_ALG_ID] = IKEv2_ENCR_AES_CCM_12,
+#ifdef SADB_X_EALG_AES_CCM_ICV12
+			[SADB_ALG_ID] = SADB_X_EALG_AES_CCM_ICV12,
+#endif
 		},
-		.fips = true,
+		.fips.approved = true,
 	},
 	.enc_blocksize =  AES_BLOCK_SIZE,
 	.salt_size = 3,
@@ -274,9 +280,6 @@ const struct encrypt_desc ike_alg_encrypt_aes_ccm_12 =
 	.keydeflen =      AEAD_AES_KEY_DEF_LEN,
 	.key_bit_lengths = { 256, 192, 128, },
 	.aead_tag_size = 12,
-#ifdef SADB_X_EALG_AES_CCM_ICV12
-	.encrypt_sadb_ealg_id = SADB_X_EALG_AES_CCM_ICV12,
-#endif
 	.encrypt_netlink_xfrm_name = "rfc4309(ccm(aes))",
 	.encrypt_tcpdump_name = "aes_ccm_12",
 	.encrypt_ike_audit_name = "aes_ccm_12",
@@ -293,8 +296,11 @@ const struct encrypt_desc ike_alg_encrypt_aes_ccm_16 =
 			[IKEv1_OAKLEY_ID] = -1,
 			[IKEv1_ESP_ID] = ESP_AES_CCM_16,
 			[IKEv2_ALG_ID] = IKEv2_ENCR_AES_CCM_16,
+#ifdef SADB_X_EALG_AES_CCM_ICV16
+			[SADB_ALG_ID] = SADB_X_EALG_AES_CCM_ICV16,
+#endif
 		},
-		.fips = true,
+		.fips.approved = true,
 	},
 	.enc_blocksize = AES_BLOCK_SIZE,
 	.salt_size = 3,
@@ -304,9 +310,6 @@ const struct encrypt_desc ike_alg_encrypt_aes_ccm_16 =
 	.keydeflen =     AEAD_AES_KEY_DEF_LEN,
 	.key_bit_lengths = { 256, 192, 128, },
 	.aead_tag_size = 16,
-#ifdef SADB_X_EALG_AES_CCM_ICV16
-	.encrypt_sadb_ealg_id = SADB_X_EALG_AES_CCM_ICV16,
-#endif
 	.encrypt_netlink_xfrm_name = "rfc4309(ccm(aes))",
 	.encrypt_tcpdump_name = "aes_ccm_16",
 	.encrypt_ike_audit_name = "aes_ccm_16",
@@ -324,7 +327,7 @@ const struct prf_desc ike_alg_prf_aes_xcbc = {
 			[IKEv1_ESP_ID] = -1,
 			[IKEv2_ALG_ID] = IKEv2_PRF_AES128_XCBC,
 		},
-		.fips = false,
+		.fips.approved = false,
 	},
 	.nss = {
 		.mechanism = CKM_AES_ECB,
@@ -347,17 +350,17 @@ const struct integ_desc ike_alg_integ_aes_xcbc = {
 			[IKEv1_OAKLEY_ID] = -1,
 			[IKEv1_ESP_ID] = AUTH_ALGORITHM_AES_XCBC,
 			[IKEv2_ALG_ID] = IKEv2_INTEG_AES_XCBC_96,
+#ifdef SADB_X_AALG_AES_XCBC_MAC
+			[SADB_ALG_ID] = SADB_X_AALG_AES_XCBC_MAC,
+#endif
 		},
-		.fips = false,
+		.fips.approved = false,
 	},
 	.integ_keymat_size = AES_XCBC_DIGEST_SIZE,
 	.integ_output_size = AES_XCBC_DIGEST_SIZE_TRUNC, /* XXX 96 */
 	.integ_ikev1_ah_transform = AH_AES_XCBC_MAC,
 #ifdef USE_PRF_AES_XCBC
 	.prf = &ike_alg_prf_aes_xcbc,
-#endif
-#ifdef SADB_X_AALG_AES_XCBC_MAC
-	.integ_sadb_aalg_id = SADB_X_AALG_AES_XCBC_MAC,
 #endif
 	.integ_netlink_xfrm_name = "xcbc(aes)",
 	.integ_tcpdump_name = "aes_xcbc",
@@ -374,15 +377,15 @@ const struct integ_desc ike_alg_integ_aes_cmac = {
 			[IKEv1_OAKLEY_ID] = -1,
 			[IKEv1_ESP_ID] = AUTH_ALGORITHM_AES_CMAC_96,
 			[IKEv2_ALG_ID] = IKEv2_INTEG_AES_CMAC_96,
+#ifdef SADB_X_AALG_AES_CMAC_96
+			[SADB_ALG_ID] = SADB_X_AALG_AES_CMAC_96,
+#endif
 		},
-		.fips = true,
+		.fips.approved = true,
 	},
 	.integ_keymat_size = BYTES_FOR_BITS(128),
 	.integ_output_size = BYTES_FOR_BITS(96), /* truncated */
 	.integ_ikev1_ah_transform = AH_AES_CMAC_96,
-#ifdef SADB_X_AALG_AES_CMAC_96
-	.integ_sadb_aalg_id = SADB_X_AALG_AES_CMAC_96,
-#endif
 	.integ_netlink_xfrm_name = "cmac(aes)",
 	.integ_tcpdump_name = "aes_cmac",
 	.integ_ike_audit_name = "aes_cmac",
@@ -402,8 +405,14 @@ const struct encrypt_desc ike_alg_encrypt_null_integ_aes_gmac = {
 			[IKEv1_OAKLEY_ID] = -1,
 			[IKEv1_ESP_ID] = ESP_NULL_AUTH_AES_GMAC,
 			[IKEv2_ALG_ID] = IKEv2_ENCR_NULL_AUTH_AES_GMAC,
+#ifdef SADB_X_EALG_NULL_AUTH_AES_GMAC
+			[SADB_ALG_ID] = SADB_X_EALG_NULL_AUTH_AES_GMAC,
+#endif
+#ifdef SADB_X_EALG_AESGMAC
+			[SADB_ALG_ID] = SADB_X_EALG_AESGMAC,
+#endif
 		},
-		.fips = true,
+		.fips.approved = true,
 	},
 	.enc_blocksize = AES_BLOCK_SIZE,
 	.wire_iv_size = 8,
@@ -412,12 +421,6 @@ const struct encrypt_desc ike_alg_encrypt_null_integ_aes_gmac = {
 	.keydeflen = AEAD_AES_KEY_DEF_LEN,
 	.key_bit_lengths = { 256, 192, 128, },
 	.aead_tag_size = 16,
-#ifdef SADB_X_EALG_NULL_AUTH_AES_GMAC
-	.encrypt_sadb_ealg_id = SADB_X_EALG_NULL_AUTH_AES_GMAC,
-#endif
-#ifdef SADB_X_EALG_AESGMAC
-	.encrypt_sadb_ealg_id = SADB_X_EALG_AESGMAC,
-#endif
 	.encrypt_netlink_xfrm_name = "rfc4543(gcm(aes))",
 	.encrypt_tcpdump_name = "NULL_AUTH_AES_GMAC",
 	.encrypt_ike_audit_name = "NULL_AUTH_AES_GMAC",

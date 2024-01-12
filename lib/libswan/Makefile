@@ -4,7 +4,7 @@
 # Copyright (C) 2003, 2004 Xelerance Corporation
 # Copyright (C) 2012 Paul Wouters <pwouters@redhat.com>
 # Copyright (C) 2012-2013 Paul Wouters <paul@libreswan.org>
-# Copyright (C) 2015-2019 Andrew Cagney
+# Copyright (C) 2015-2022 Andrew Cagney
 # Copyright (C) 2019 Tuomo Soini <tis@foobar.fi>
 #
 # This program is free software; you can redistribute it and/or modify it
@@ -40,6 +40,7 @@ LIB = libswan.a
 OBJS += x509dn.o asn1.o oid.o
 
 OBJS += authby.o
+OBJS += rnd.o
 
 OBJS += constants.o \
 	id.o \
@@ -56,16 +57,20 @@ OBJS += constants.o \
 	lswnss.o \
 	alg_byname.o
 
+OBJS += cloexec_socket.o
+OBJS += secret_pubkey_stuff_to_pubkey_der.o
+OBJS += pubkey_der_to_pubkey_content.o
 OBJS += clone_shunk_tokens.o
 OBJS += secrets.o
 OBJS += pubkey_rsa.o
 OBJS += pubkey_ecdsa.o
-OBJS += base64_pubkey.o
 
 OBJS += sparse_names.o
 OBJS += ttoaddress.o
 OBJS += ttoaddress_list_num.o
 OBJS += ttoprotocol.o
+OBJS += ttobinary-iec-60027-2.o
+OBJS += binaryscale-iec-60027-2.o
 OBJS += alloc.o
 OBJS += alloc_printf.o
 
@@ -78,7 +83,6 @@ OBJS += reqid.o
 OBJS += keyid.o
 
 ifneq ($(LINUX_VARIANT),)
-OBJS += addr_lookup.o
 OBJS += kernel_netlink_reply.o
 OBJS += kernel_netlink_query.o
 ifeq ($(USE_XFRM_INTERFACE), true)
@@ -86,6 +90,10 @@ OBJS += netlink_attrib.o
 endif
 endif
 
+# implement resolve_default_route()
+ifneq ($(LINUX_VARIANT),)
+OBJS += resolve_default_route_linux.o
+endif
 ifneq ($(BSD_VARIANT),)
 OBJS += resolve_default_route_bsd.o
 endif
@@ -135,6 +143,7 @@ OBJS += timescale.o
 OBJS += deltatime.o
 OBJS += realtime.o
 OBJS += monotime.o
+OBJS += ttodeltatime.o
 
 OBJS += refcnt.o
 OBJS += debug.o
@@ -145,6 +154,8 @@ OBJS += DBG_dump.o
 OBJS += DBG_log.o
 OBJS += DBG_va_list.o
 
+OBJS += llog_base64_bytes.o
+OBJS += llog_pem_bytes.o
 OBJS += llog_errno.o
 OBJS += log_error.o
 OBJS += fatal.o
@@ -154,7 +165,9 @@ OBJS += lswglob.o
 
 OBJS += global_logger.o
 OBJS += jambuf.o
+OBJS += jam_humber.o
 OBJS += jam_bytes.o
+OBJS += jam_base64_bytes.o
 OBJS += llog.o
 OBJS += llog_dump.o
 OBJS += llog_va_list.o
@@ -203,16 +216,22 @@ ifeq ($(USE_CAMELLIA),true)
 OBJS += ike_alg_camellia.o
 endif
 
+# used by Vendor ID
+OBJS += ike_alg_hash_md5.o
 ifeq ($(USE_MD5),true)
 OBJS += ike_alg_md5.o
 endif
 
 OBJS += ike_alg_none.o
 
+# used by NAT
+OBJS += ike_alg_hash_sha1.o
 ifeq ($(USE_SHA1),true)
 OBJS += ike_alg_sha1.o
 endif
 
+# used by Cookies
+OBJS += ike_alg_hash_sha2_256.o
 ifeq ($(USE_SHA2),true)
 OBJS += ike_alg_sha2.o
 endif
@@ -243,7 +262,13 @@ ifeq ($(USE_UNBOUND_EVENT_H_COPY),true)
 USERLAND_INCLUDES += -I$(top_srcdir)/include/unbound
 endif
 
+OBJS += enum_names.o
 OBJS += pluto_exit_code_names.o
+OBJS += ipseckey_algorithm_type_names.o
+OBJS += ipseckey_algorithm_config_names.o
+ifneq ($(LINUX_VARIANT),)
+OBJS += xfrm_policy_names.o
+endif
 
 OBJS += $(abs_builddir)/version.o
 

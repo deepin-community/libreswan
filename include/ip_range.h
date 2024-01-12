@@ -31,12 +31,12 @@ typedef struct {
 	struct ip_bytes end;
 } ip_range;
 
-#define PRI_RANGE "<range-%s:IPv%d["PRI_BYTES"]->["PRI_BYTES"]>"
+#define PRI_RANGE "<range-%s:IPv%d["PRI_IP_BYTES"]->["PRI_IP_BYTES"]>"
 #define pri_range(R)					\
 		((R)->is_set ? "set" : "unset"),	\
 		(R)->version,				\
-		pri_bytes((R)->start),			\
-		pri_bytes((R)->end)
+		pri_ip_bytes((R)->start),		\
+		pri_ip_bytes((R)->end)
 
 void pexpect_range(const ip_range *r, where_t where);
 #define prange(R) pexpect_range(R, HERE)
@@ -82,6 +82,7 @@ extern const ip_range unset_range;
 
 bool range_is_unset(const ip_range *r);			/* handles NULL */
 const struct ip_info *range_type(const ip_range *r);	/* handles NULL */
+const struct ip_info *range_info(const ip_range r);	/* handles NULL */
 
 bool range_is_zero(ip_range range);	/* ::-ffff... or 0.0.0.0-0.0.0.0 */
 bool range_is_all(const ip_range r);	/* ::-:: or 0.0.0.0-0.0.0.0 */

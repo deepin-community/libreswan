@@ -1241,13 +1241,12 @@ static bool emit_transform_header(struct pbs_out *proposal_pbs,
 		.isat_transid = transform_id,
 		.isat_lt = is_last_transform ? v2_TRANSFORM_LAST : v2_TRANSFORM_NON_LAST,
 	};
-	diag_t d = pbs_out_struct(proposal_pbs, &ikev2_trans_desc,
-				  &trans, sizeof(trans), transform_pbs);
-	if (d != NULL) {
-		llog_diag(RC_LOG_SERIOUS, proposal_pbs->outs_logger, &d,
-			 "out_struct() of transform failed: ");
-		return false;
+	if (!pbs_out_struct(proposal_pbs, &ikev2_trans_desc,
+			    &trans, sizeof(trans), transform_pbs)) {
+		/* already logged */
+		return false; /*fatal*/
 	}
+
 	return true;
 }
 
@@ -1498,17 +1497,27 @@ static bool emit_proposal(struct pbs_out *sa_pbs,
 			  enum ikev2_last_proposal last_proposal,
 			  bool allow_single_transform_none)
 {
-	diag_t d;
 	int numtrans = walk_transforms(NULL, -1, proposal, propnum,
 				       allow_single_transform_none, sa_pbs->outs_logger);
 	if (numtrans < 0) {
 		return false;
 	}
 
+	enum ikev2_sec_proto_id proposal_protoid = proposal->protoid;
+	if (impair.v2_proposal_protoid > 0) {
+		enum_buf ebo, ebn;
+		enum ikev2_sec_proto_id protoid = impair.v2_proposal_protoid - 1; /* unbias */
+		llog(RC_LOG, sa_pbs->outs_logger, "IMPAIR: changing proposal substructure Protocol ID from %s to %s (%u)",
+		     str_enum_short(&ikev2_proposal_protocol_id_names, proposal_protoid, &ebo),
+		     str_enum_short(&ikev2_proposal_protocol_id_names, protoid, &ebn),
+		     protoid);
+		proposal_protoid = protoid;
+	}
+
 	struct ikev2_prop prop = {
 		.isap_lp = last_proposal,
 		.isap_propnum = propnum,
-		.isap_protoid = proposal->protoid,
+		.isap_protoid = proposal_protoid,
 		.isap_spisize = local_spi.len,
 		.isap_numtrans = numtrans,
 	};
@@ -1520,9 +1529,8 @@ static bool emit_proposal(struct pbs_out *sa_pbs,
 
 	if (local_spi.len > 0) {
 		pexpect(local_spi.len == proto_spi_size(proposal->protoid));
-		d = pbs_out_hunk(&proposal_pbs, local_spi, "our spi");
-		if (d != NULL) {
-			llog_diag(RC_LOG_SERIOUS, sa_pbs->outs_logger, &d, "%s", "");
+		if (!pbs_out_hunk(&proposal_pbs, local_spi, "our spi")) {
+			/* already logged */
 			return false;
 		}
 	}
@@ -1738,14 +1746,16 @@ bool ikev2_proposal_to_proto_info(const struct ikev2_proposal *proposal,
 				  struct ipsec_proto_info *proto_info,
 				  struct logger *logger)
 {
+	const monotime_t now = mononow();
+
 	/*
 	 * Start with ZERO for everything.
 	 */
-	if (!pexpect(sizeof(proto_info->attrs.spi) == proposal->remote_spi.size))
+	if (!pexpect(sizeof(proto_info->outbound.spi) == proposal->remote_spi.size))
 		return false;
 
-	memcpy(&proto_info->attrs.spi, proposal->remote_spi.bytes,
-	       sizeof(proto_info->attrs.spi));
+	memcpy(&proto_info->outbound.spi, proposal->remote_spi.bytes,
+	       sizeof(proto_info->outbound.spi));
 
 	/*
 	 * Use generic code to convert everything.
@@ -1757,8 +1767,8 @@ bool ikev2_proposal_to_proto_info(const struct ikev2_proposal *proposal,
 
 	proto_info->attrs.transattrs = ta;
 	proto_info->present = true;
-	proto_info->our_lastused = mononow();
-	proto_info->peer_lastused = mononow();
+	proto_info->inbound.last_used = now;
+	proto_info->outbound.last_used = now;
 
 	proto_info->attrs.mode = ENCAPSULATION_MODE_TUNNEL;
 
@@ -2181,16 +2191,16 @@ struct ikev2_proposals *get_v2_child_proposals(struct connection *c,
 struct ikev2_proposals *get_v2_CREATE_CHILD_SA_new_child_proposals(struct ike_sa *ike,
 								   struct child_sa *larval_child)
 {
-	const char *why = "new Child SA";
 	struct connection *c = larval_child->sa.st_connection;
 	const struct dh_desc *default_dh =
 		c->policy & POLICY_PFS ? ike->sa.st_oakley.ta_dh : NULL;
 	struct ikev2_proposals *proposals =
 		get_v2_child_proposals(larval_child->sa.st_connection,
-				       "Child SA proposals (new)", default_dh,
+				       "Child SA proposals (new child)", default_dh,
 				       larval_child->sa.st_logger);
 	llog_v2_proposals(LOG_STREAM/*not-whack*/|RC_LOG,
-			  larval_child->sa.st_logger, proposals, why);
+			  larval_child->sa.st_logger, proposals,
+			  "Child SA proposals (new child)");
 	return proposals;
 }
 

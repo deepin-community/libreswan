@@ -42,11 +42,11 @@ west #
  ../../guestbin/libreswan-up-down.sh esp=null-none -I 192.0.1.254 192.0.2.254
 002 "esp=null-none": added IKEv2 connection
 1v2 "esp=null-none" #1: initiating IKEv2 connection
-1v2 "esp=null-none" #1: sent IKE_SA_INIT request
+1v2 "esp=null-none" #1: sent IKE_SA_INIT request to 192.1.2.23:500
 002 "esp=null-none" #1: IMPAIR: proposal 1 transform INTEG=NONE included when counting transforms
 002 "esp=null-none" #1: IMPAIR: proposal 1 transform INTEG=NONE included when emitting proposal
 1v2 "esp=null-none" #1: sent IKE_AUTH request {cipher=AES_CBC_128 integ=HMAC_SHA1_96 prf=HMAC_SHA1 group=MODP2048}
-003 "esp=null-none" #1: initiator established IKE SA; authenticated using RSASSA-PSS with SHA2_512 and preloaded certificate '@east'
+003 "esp=null-none" #1: initiator established IKE SA; authenticated peer '2nnn-bit RSASSA-PSS with SHA2_512' digital signature using preloaded certificate '@east'
 004 "esp=null-none" #2: initiator established Child SA using #1; IPsec tunnel [192.0.1.0-192.0.1.255:0-65535 0] -> [192.0.2.0-192.0.2.255:0-65535 0] {ESP/ESN=>0xESPESP <0xESPESP xfrm=NULL-NONE DPD=passive}
 up
 002 "esp=null-none": terminating SAs using this connection
@@ -61,11 +61,11 @@ west #
  ../../guestbin/libreswan-up-down.sh esp=null-none -I 192.0.1.254 192.0.2.254
 002 "esp=null-none": added IKEv2 connection
 1v2 "esp=null-none" #3: initiating IKEv2 connection
-1v2 "esp=null-none" #3: sent IKE_SA_INIT request
+1v2 "esp=null-none" #3: sent IKE_SA_INIT request to 192.1.2.23:500
 002 "esp=null-none" #3: IMPAIR: proposal 1 transform INTEG=NONE excluded when counting transforms
 002 "esp=null-none" #3: IMPAIR: proposal 1 transform INTEG=NONE excluded when emitting proposal
 1v2 "esp=null-none" #3: sent IKE_AUTH request {cipher=AES_CBC_128 integ=HMAC_SHA1_96 prf=HMAC_SHA1 group=MODP2048}
-003 "esp=null-none" #3: initiator established IKE SA; authenticated using RSASSA-PSS with SHA2_512 and preloaded certificate '@east'
+003 "esp=null-none" #3: initiator established IKE SA; authenticated peer '2nnn-bit RSASSA-PSS with SHA2_512' digital signature using preloaded certificate '@east'
 004 "esp=null-none" #4: initiator established Child SA using #3; IPsec tunnel [192.0.1.0-192.0.1.255:0-65535 0] -> [192.0.2.0-192.0.2.255:0-65535 0] {ESP/ESN=>0xESPESP <0xESPESP xfrm=NULL-NONE DPD=passive}
 up
 002 "esp=null-none": terminating SAs using this connection
@@ -82,7 +82,15 @@ XFRM state:
 XFRM policy:
 XFRM done
 IPSEC mangle TABLES
-NEW_IPSEC_CONN mangle TABLES
+iptables filter TABLE
+Chain INPUT (policy ACCEPT)
+target     prot opt source               destination         
+ACCEPT     all  --  0.0.0.0/0            0.0.0.0/0            policy match dir in pol ipsec
+DROP       all  --  192.0.2.0/24         0.0.0.0/0           
+Chain FORWARD (policy ACCEPT)
+target     prot opt source               destination         
+Chain OUTPUT (policy ACCEPT)
+target     prot opt source               destination         
 ROUTING TABLES
 default via 192.1.2.254 dev eth1
 192.0.1.0/24 dev eth0 proto kernel scope link src 192.0.1.254

@@ -105,7 +105,7 @@ static asn1_t get_peer_ca(struct pubkey_list *const *pubkey_db,
 
 	for (p = *pubkey_db; p != NULL; p = p->next) {
 		struct pubkey *key = p->key;
-		if (key->type == &pubkey_type_rsa && same_id(peer_id, &key->id))
+		if (key->content.type == &pubkey_type_rsa && same_id(peer_id, &key->id))
 			return key->issuer;
 	}
 	return null_shunk;
@@ -178,7 +178,7 @@ static struct connection *refine_host_connection_on_responder(int indent,
 
 	indent = 1;
 
-	const generalName_t *requested_ca = st->st_requested_ca;
+	const generalName_t *requested_ca = st->st_v1_requested_ca;
 
 	passert(!LHAS(proposed_authbys, AUTH_NEVER));
 	passert(!LHAS(proposed_authbys, AUTH_UNSET));

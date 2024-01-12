@@ -31,6 +31,8 @@
 #include <unistd.h>	/* for sleep() */
 #include <limits.h>	/* for UINT_MAX, ULONG_MAX */
 
+#include "ttodata.h"
+
 #include "defs.h"
 #include "log.h"
 #include "state.h"
@@ -40,7 +42,7 @@
 #include "list_entry.h"
 #include "pluto_timing.h"
 
-#ifdef HAVE_SECCOMP
+#ifdef USE_SECCOMP
 # include "pluto_seccomp.h"
 #endif
 
@@ -78,7 +80,7 @@ struct job {
 	struct list_entry backlog;
 	so_serial_t so_serialno;		/* sponsoring state-object's serial number */
 	bool cancelled;
-	const char *name;
+	where_t where;
 	job_id_t job_id;
 	helper_id_t helper_id;
 	struct cpu_usage time_used;
@@ -90,7 +92,7 @@ struct job {
 #define PRI_JOB "job %u helper %u #%lu %s (%s)"
 #define pri_job(JOB)							\
 	JOB->job_id, JOB->helper_id, JOB->so_serialno,			\
-		JOB->name, JOB->handler->name
+	JOB->where->func, JOB->handler->name
 
 /*
  * The work queue.  Accesses must be locked.
@@ -112,8 +114,8 @@ static void jam_backlog(struct jambuf *buf, const void *data)
 		if (job->cancelled) {
 			jam(buf, " cancelled");
 		}
-		if (job->name != NULL) {
-			jam(buf, " %s", job->name);
+		if (job->where != NULL) {
+			jam(buf, " %s", job->where->func);
 		}
 		if (job->handler != NULL) {
 			jam(buf, " (%s)", job->handler->name);
@@ -193,7 +195,7 @@ static void *helper_thread(void *arg)
 	const struct helper_thread *w = arg;
 	ldbg(w->logger, "starting thread");
 
-#ifdef HAVE_SECCOMP
+#ifdef USE_SECCOMP
 	init_seccomp_cryptohelper(w->helper_id, w->logger);
 #else
 	llog(RC_LOG, w->logger, "seccomp security for helper not supported");
@@ -313,11 +315,18 @@ void submit_task(const struct logger *logger,
 		 struct state *st,
 		 struct task *task,
 		 const struct task_handler *handler,
-		 const char *name)
+		 where_t where)
 {
-	struct job *job = alloc_thing(struct job, name);
+	if (st->st_offloaded_task != NULL) {
+		llog_pexpect(st->st_logger, where,
+			     "state already has outstanding crypto ["PRI_WHERE"]",
+			     pri_where(st->st_offloaded_task->where));
+		return;
+	}
+
+	struct job *job = alloc_thing(struct job, where->func);
 	job->cancelled = false;
-	job->name = name;
+	job->where = where;
 	init_list_entry(&backlog_info, job, &job->backlog);
 	job->so_serialno = SOS_NOBODY;
 
@@ -340,8 +349,6 @@ void submit_task(const struct logger *logger,
 	/*
 	 * Save in case it needs to be cancelled.
 	 */
-
-	pexpect(st->st_offloaded_task == NULL);
 	st->st_offloaded_task = job;
 	st->st_offloaded_task_in_background = false;
 	job->logger = clone_logger(logger, HERE);

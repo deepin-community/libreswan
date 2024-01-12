@@ -1,5 +1,54 @@
 
 See also https://libreswan.org/
+v4.12 (Aug 8, 2023)
+* SECURITY IKEv2: Fixes https://libreswan.org/security/CVE-2023-38710
+* SECURITY IKEv1: Fixes https://libreswan.org/security/CVE-2023-38711
+* SECURITY IKEv1: Fixes https://libreswan.org/security/CVE-2023-38712
+* pluto: Do not crash on ipcomp expiry msg [Andrew]
+
+v4.11 (May 3, 2023)
+* SECURITY IKEv1: Fixes https://libreswan.org/security/CVE-2023-30570
+
+v4.10 (February 28, 2023)
+* SECURITY IKEv2: Fixes https://libreswan.org/security/CVE-2023-23009
+* IKEv1: only clean up a connection when it isn't deleted [Andrew]
+
+v4.9 (October 13, 2022)
+* IKEv1: fix crasher (introduced in 4.8) when USE_NSS_KDF=false or MD5 [Andrew]
+* IKEv2: fix RFC 8229 IKE/ESP over IPv6 TCP [Andrew]
+
+v4.8 (October 2, 2022)
+* release: remove SHA1 bindings from LIBRESWAN OpenPGP key [dkg/Paul]
+* pluto: ignore obsoleted unused interfaces= / --iface [Paul/Andrew]
+* pluto: various internal crypto struct changes [Andrew]
+* pluto: fix traffic counters for AH and IPCOMP [Andrew]
+* pluto: improve logging of duplicate serial cert error [Andrew]
+* pluto: support for maxbytes/maxpacket counters [Antony/Paul]
+* pluto: handle HW tokens using strange CKAIDs; github/815 [Andrew]
+* pluto: added --ipsec-max-bytes / --ipsec-max-packets support [Antony]
+* libipsecconf: added ipsec-max-bytes= and ipsec-max-packets= options [Paul]
+* IKEv2: emit one CERTREQ payload with all the hashes [Andrew]
+* addconn/whack: add support for {left,right}pubkey= [Andrew]
+* showhostkey: add support for ECDSA pubkeys [Andrew]
+* Crypto: add KDF self tests [Daiki Ueno]
+* IPv6: open IPv6 IKE port 4500; github/800 [Andrew]
+* showhostkey: add --pem option to print PEM encoded public key [Andrew]
+* unbound: _unbound-hook converted from python to shell [Andrew]
+* BSD: delete old BSDKAME code replaced by PFKEYV2 code [Andrew]
+* BSD: fix replay window byte vs bit math [Andrew]
+* BSD: fix code finding interfaces; github/728 [Andrew]
+* FreeBSD: support large replay window; github/756 [Andrew]
+* FreeBSD: support ESN; github/721 [Andrew]
+* linux: update copy of xfrm.h header [Paul]
+* packaging: update fedora spec file [Paul/Tuomo]
+* building: on BSD, always use GCC; freebsd/264288 llvm/55963 [Andrew]
+* building: enable LTO when USE_LTO=true; github/836 github/834 [Andrew]
+* building: dropped default build and packaging support for:
+  	    Fedora 22, 28, 29, 30
+            Debian stretch
+            Ubuntu cosmic, xenial
+            RHEL6 was removed in v4.5
+            Add SUSE, Arch, Mint
 
 v4.7 (May 24, 2022)
 * IKEv2: EAPTLS support [Timo Teräs / Andrew]
@@ -8,7 +57,6 @@ v4.7 (May 24, 2022)
 * IKEv2: fix race between new IKE SA and liveness [Andrew]
 * IKEv2: fix interop with Android 12 + certificates [Andrew]
 * IKEv1: reject IKEv2 only authby=secret+rsasig [Andrew]
-* config: end keywords with no left/right prefix are applied to both ends
 * kernel: fix double delete of kernel policy when tearing down SA [Andrew]
 * kernel: fix deleting policy when an XFRMi FD ID; github/618 [Andrew]
 * kernel: general cleanups [Andrew]

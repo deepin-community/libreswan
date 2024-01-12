@@ -165,6 +165,7 @@
 #include "ip_selector.h"
 #include "unpack.h"
 #include "pending.h"
+#include "rekeyfuzz.h"
 
 #ifdef HAVE_NM
 #include "kernel.h"
@@ -1100,10 +1101,20 @@ void process_v1_packet(struct msg_digest *md)
 	struct state *st = NULL;
 	enum state_kind from_state = STATE_UNDEFINED;   /* state we started in */
 
+	/*
+	 * For the initial responses, don't leak the responder's SPI.
+	 * Hence the use of send_v1_notification_from_md().
+	 *
+	 * AGGR mode is a mess in that the R0->R1 transition happens
+	 * well before the transition succeeds.
+	 */
 #define SEND_NOTIFICATION(t)						\
 	{								\
 		pstats(ikev1_sent_notifies_e, t);			\
-		if (st != NULL)						\
+		if (st != NULL &&					\
+		    st->st_state->kind != STATE_AGGR_R0 &&		\
+		    st->st_state->kind != STATE_AGGR_R1 &&		\
+		    st->st_state->kind != STATE_MAIN_R0)		\
 			send_v1_notification_from_state(st, from_state, t); \
 		else							\
 			send_v1_notification_from_md(md, t);		\
@@ -1167,17 +1178,26 @@ void process_v1_packet(struct msg_digest *md)
 			from_state = (md->hdr.isa_xchg == ISAKMP_XCHG_IDPROT ?
 				      STATE_MAIN_R0 : STATE_AGGR_R0);
 		} else {
-			/* not an initial message */
+			/*
+			 * Possibly not an initial message.  Possibly
+			 * from initiator.  Possibly from responder.
+			 *
+			 * Possibly.  Which is probably hopeless.
+			 */
 
 			st = find_state_ikev1(&md->hdr.isa_ike_spis,
 					      md->hdr.isa_msgid);
 
 			if (st == NULL) {
 				/*
-				 * perhaps this is a first message
+				 * Perhaps this is a first message
 				 * from the responder and contains a
 				 * responder cookie that we've not yet
 				 * seen.
+				 *
+				 * Perhaps this is a random message
+				 * with a bogus non-zero responder IKE
+				 * SPI.
 				 */
 				st = find_state_ikev1_init(&md->hdr.isa_ike_initiator_spi,
 							   md->hdr.isa_msgid);
@@ -1186,6 +1206,21 @@ void process_v1_packet(struct msg_digest *md)
 					llog(RC_LOG, md->md_logger,
 					     "phase 1 message is part of an unknown exchange");
 					/* XXX Could send notification back */
+					return;
+				}
+				if (st->st_state->kind == STATE_AGGR_R0) {
+					/*
+					 * The only way for this to
+					 * happen is for the attacker
+					 * to guess the responder's
+					 * IKE SPI that hasn't been
+					 * sent over the wire?
+					 *
+					 * Well that or played 1/2^32
+					 * odds.
+					 */
+					llog_pexpect(md->md_logger, HERE,
+						     "phase 1 message matching AGGR_R0 state");
 					return;
 				}
 			}
@@ -1604,16 +1639,23 @@ void process_v1_packet(struct msg_digest *md)
 				} else if (frag->index == last_frag_index) {
 					struct msg_digest *whole_md = alloc_md(frag->md->iface,
 									       &frag->md->sender,
+									       NULL/*packet*/, size,
 									       HERE);
-					uint8_t *buffer = alloc_bytes(size,
-								      "IKE fragments buffer");
-					size_t offset = 0;
 
-					/* Reassemble fragments in buffer */
+					/*
+					 * Reassemble fragments in
+					 * buffer.
+					 *
+					 * Header is taken directly
+					 * from first fragment.
+					 *
+					 * XXX: DANGER! this code is
+					 * re-using FRAG.
+					 */
 					frag = st->st_v1_rfrags;
-					while (frag != NULL &&
-					       frag->index <= last_frag_index)
-					{
+					uint8_t *buffer = whole_md->packet_pbs.start;
+					size_t offset = 0;
+					while (frag != NULL && frag->index <= last_frag_index) {
 						passert(offset + frag->size <=
 							size);
 						memcpy(buffer + offset,
@@ -1622,10 +1664,14 @@ void process_v1_packet(struct msg_digest *md)
 						frag = frag->next;
 					}
 
-					init_pbs(&whole_md->packet_pbs, buffer, size,
-						 "packet");
-
-					process_packet(&whole_md);
+					/*
+					 * process_md() calls
+					 * process_v1_packet(), but
+					 * only after first
+					 * initializing .hdr and
+					 * .message_pbs.
+					 */
+					process_md(whole_md);
 					md_delref(&whole_md);
 					free_v1_message_queues(st);
 					/* optimize: if receiving fragments, immediately respond with fragments too */
@@ -1748,7 +1794,6 @@ void process_packet_tail(struct msg_digest *md)
 	const struct state_v1_microcode *smc = md->smc;
 	enum state_kind from_state = smc->state;
 	bool new_iv_set = md->new_iv_set;
-	bool self_delete = false;
 
 	if (md->hdr.isa_flags & ISAKMP_FLAGS_v1_ENCRYPTION) {
 
@@ -2223,19 +2268,21 @@ void process_packet_tail(struct msg_digest *md)
 		}
 	}
 
+	pexpect(st == md->v1_st); /* could be NULL */
+
 	for (struct payload_digest *p = md->chain[ISAKMP_NEXT_D];
 	     p != NULL; p = p->next) {
-		self_delete |= accept_delete(md, p);
-		if (DBGP(DBG_BASE)) {
-			DBG_dump("del:", p->pbs.cur,
-				 pbs_left(&p->pbs));
+		if (!accept_delete(&st, md, p)) {
+			ldbg(md->md_logger, "bailing with bad delete message");
+			return;
 		}
-		if (md->v1_st != st) {
-			pexpect(md->v1_st == NULL);
-			dbg("zapping ST as accept_delete() zapped MD.ST");
-			st = md->v1_st;
+		if (st == NULL) {
+			ldbg(md->md_logger, "bailing due to self-inflicted delete");
+			return;
 		}
 	}
+
+	pexpect(st == md->v1_st); /* could be NULL */
 
 	for (struct payload_digest *p = md->chain[ISAKMP_NEXT_VID];
 	     p != NULL; p = p->next) {
@@ -2243,18 +2290,18 @@ void process_packet_tail(struct msg_digest *md)
 				   (st != NULL ? st->st_logger : md->md_logger));
 	}
 
-	if (self_delete) {
-		accept_self_delete(md);
-		st = md->v1_st;
-		/* note: st ought to be NULL from here on */
-	}
+	pexpect(st == md->v1_st); /* could be NULL */
 
-	pexpect(st == md->v1_st);
-	statetime_t start = statetime_start(md->v1_st);
 	/*
-	 * XXX: danger - the .informational() processor deletes ST;
-	 * and then tunnels this loss through MD.ST.
+	 * XXX: Danger.
+	 *
+	 * ++ the .informational() processor deletes ST; and then
+	 * tries to tunnel this loss back through MD.ST.
+	 *
+	 * ++ the .aggressive() processor replaces .V1_ST with the IKE
+	 * SA?
 	 */
+	statetime_t start = statetime_start(st);
 	stf_status e = smc->processor(st, md);
 	complete_v1_state_transition(md->v1_st, md, e);
 	statetime_stop(&start, "%s()", __func__);
@@ -2598,12 +2645,6 @@ void complete_v1_state_transition(struct state *st, struct msg_digest *md, stf_s
 			 * Responder, and the dictated time is
 			 * acceptable, plan to EXPIRE.
 			 *
-			 * Important policy lies buried here.  For
-			 * example, we favour the initiator over the
-			 * responder by making the initiator start
-			 * rekeying sooner.  Also, fuzz is only added
-			 * to the initiator's margin.
-			 *
 			 * Note: for ISAKMP SA, we let the negotiated
 			 * time stand (implemented by earlier logic).
 			 */
@@ -2614,25 +2655,15 @@ void complete_v1_state_transition(struct state *st, struct msg_digest *md, stf_s
 					      EVENT_SA_EXPIRE);
 			}
 			if (event_type != EVENT_SA_EXPIRE) {
-				time_t marg_s = deltasecs(c->sa_rekey_margin);
-
-				if (smc->flags & SMF_INITIATOR) {
-					marg_s += marg_s *
-						c->sa_rekey_fuzz /
-						100.E0 *
-						(rand() /
-						 (RAND_MAX + 1.E0));
-				} else {
-					marg_s /= 2;
-				}
-				deltatime_t marg = deltatime(marg_s);
-
+				deltatime_t marg = fuzz_rekey_margin(st->st_sa_role,
+								     c->sa_rekey_margin,
+								     c->sa_rekey_fuzz/*percent*/);
 				if (deltatime_cmp(event_delay, >, marg)) {
-					event_delay = deltatime_sub(event_delay, marg);
 					st->st_replace_margin = marg;
 				} else {
-					event_type = EVENT_SA_EXPIRE;
+					marg = deltatime(0);
 				}
+				event_delay = deltatime_sub(event_delay, marg);
 			}
 			event_schedule(event_type, event_delay, st);
 			break;
@@ -2874,21 +2905,31 @@ void complete_v1_state_transition(struct state *st, struct msg_digest *md, stf_s
 			delete_state(st);
 			/* wipe out dangling pointer to st */
 			md->v1_st = NULL;
+		} else if  (st->st_state->kind == STATE_AGGR_R0 ||
+			    st->st_state->kind == STATE_AGGR_R1 ||
+			    st->st_state->kind == STATE_MAIN_R0) {
+			/*
+			 *
+			 * Wipe out the incomplete larval state.
+			 *
+			 * ARGH! In <=v4.10, the aggr code flipped the
+			 * larval state to R1 right at the start of
+			 * the transition and not the end, so using
+			 * state to figure things out is close to
+			 * useless.
+			 *
+			 * Deleting the state means that pluto has no
+			 * way to detect and ignore amplification
+			 * attacks.
+			 */
+			delete_state(st);
+			/* wipe out dangling pointer to st */
+			md->v1_st = NULL;
 		}
+
 		break;
 	}
 	}
-}
-
-bool ikev1_ship_chain(chunk_t *chain, int n, pb_stream *outs,
-		      uint8_t type)
-{
-	for (int i = 0; i < n; i++) {
-		if (!ikev1_ship_CERT(type, HUNK_AS_SHUNK(chain[i]), outs))
-			return false;
-	}
-
-	return true;
 }
 
 void doi_log_cert_thinking(uint16_t auth,

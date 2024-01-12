@@ -27,9 +27,9 @@ west #
  ../../guestbin/libreswan-up-down.sh ah=md5 -I 192.0.1.254 192.0.2.254
 002 "ah=md5": added IKEv2 connection
 1v2 "ah=md5" #1: initiating IKEv2 connection
-1v2 "ah=md5" #1: sent IKE_SA_INIT request
+1v2 "ah=md5" #1: sent IKE_SA_INIT request to 192.1.2.23:500
 1v2 "ah=md5" #1: sent IKE_AUTH request {cipher=AES_CBC_128 integ=HMAC_SHA1_96 prf=HMAC_SHA1 group=MODP2048}
-003 "ah=md5" #1: initiator established IKE SA; authenticated using authby=secret and peer ID_FQDN '@east'
+003 "ah=md5" #1: initiator established IKE SA; authenticated peer using authby=secret and ID_FQDN '@east'
 004 "ah=md5" #2: initiator established Child SA using #1; IPsec tunnel [192.0.1.0-192.0.1.255:0-65535 0] -> [192.0.2.0-192.0.2.255:0-65535 0] {AH=>0xAHAH <0xAHAH xfrm=HMAC_MD5_96 DPD=passive}
 up
 002 "ah=md5": terminating SAs using this connection
@@ -40,9 +40,9 @@ west #
  ../../guestbin/libreswan-up-down.sh ah=sha1 -I 192.0.1.254 192.0.2.254
 002 "ah=sha1": added IKEv2 connection
 1v2 "ah=sha1" #3: initiating IKEv2 connection
-1v2 "ah=sha1" #3: sent IKE_SA_INIT request
+1v2 "ah=sha1" #3: sent IKE_SA_INIT request to 192.1.2.23:500
 1v2 "ah=sha1" #3: sent IKE_AUTH request {cipher=AES_CBC_128 integ=HMAC_SHA1_96 prf=HMAC_SHA1 group=MODP2048}
-003 "ah=sha1" #3: initiator established IKE SA; authenticated using authby=secret and peer ID_FQDN '@east'
+003 "ah=sha1" #3: initiator established IKE SA; authenticated peer using authby=secret and ID_FQDN '@east'
 004 "ah=sha1" #4: initiator established Child SA using #3; IPsec tunnel [192.0.1.0-192.0.1.255:0-65535 0] -> [192.0.2.0-192.0.2.255:0-65535 0] {AH=>0xAHAH <0xAHAH xfrm=HMAC_SHA1_96 DPD=passive}
 up
 002 "ah=sha1": terminating SAs using this connection
@@ -57,9 +57,9 @@ west #
 west #
  ipsec auto --up ah=sha1
 1v2 "ah=sha1" #5: initiating IKEv2 connection
-1v2 "ah=sha1" #5: sent IKE_SA_INIT request
+1v2 "ah=sha1" #5: sent IKE_SA_INIT request to 192.1.2.23:500
 1v2 "ah=sha1" #5: sent IKE_AUTH request {cipher=AES_CBC_128 integ=HMAC_SHA1_96 prf=HMAC_SHA1 group=MODP2048}
-003 "ah=sha1" #5: initiator established IKE SA; authenticated using authby=secret and peer ID_FQDN '@east'
+003 "ah=sha1" #5: initiator established IKE SA; authenticated peer using authby=secret and ID_FQDN '@east'
 004 "ah=sha1" #6: initiator established Child SA using #5; IPsec tunnel [192.0.1.0-192.0.1.255:0-65535 0] -> [192.0.2.0-192.0.2.255:0-65535 0] {AH=>0xAHAH <0xAHAH xfrm=HMAC_SHA1_96 DPD=passive}
 west #
  ping -n -q -c 2 -I 192.0.1.254 192.0.2.254
@@ -146,7 +146,15 @@ src 192.0.2.0/24 dst 192.0.1.0/24
 		proto ah reqid REQID mode tunnel
 XFRM done
 IPSEC mangle TABLES
-NEW_IPSEC_CONN mangle TABLES
+iptables filter TABLE
+Chain INPUT (policy ACCEPT)
+target     prot opt source               destination         
+ACCEPT     all  --  0.0.0.0/0            0.0.0.0/0            policy match dir in pol ipsec
+DROP       all  --  192.0.2.0/24         0.0.0.0/0           
+Chain FORWARD (policy ACCEPT)
+target     prot opt source               destination         
+Chain OUTPUT (policy ACCEPT)
+target     prot opt source               destination         
 ROUTING TABLES
 default via 192.1.2.254 dev eth1
 192.0.1.0/24 dev eth0 proto kernel scope link src 192.0.1.254

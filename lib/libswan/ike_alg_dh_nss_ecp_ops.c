@@ -47,40 +47,33 @@ static void nss_ecp_calc_local_secret(const struct dh_desc *group,
 	 * data) from NSS.
 	 */
 	DBGF(DBG_CRYPT, "oid %d %x", group->nss_oid, group->nss_oid);
-	SECOidData *pk11_data = SECOID_FindOIDByTag(group->nss_oid);
-	if (pk11_data == NULL) {
-		llog_passert(logger, HERE, "lookup of OID %d for EC group %s parameters failed",
-			     group->nss_oid, group->common.fqn);
-	}
-	if (DBGP(DBG_CRYPT)) {
-		LLOG_JAMBUF(DEBUG_STREAM, logger, buf) {
-			jam_string(buf, "pk11_data->oid: ");
-			jam_nss_secitem(buf, &pk11_data->oid);
-		}
-	}
 
 	/*
-	 * Need to prepend the param with its size; for moment assume
-	 * the returned value is small.  If it ever gets too big will
-	 * need to re-encode the length some how.
+	 * Wrap the raw OID in ASN.1.  SECKEYECParams is just a
+	 * glorifed SECItem.
+	 *
+	 * See also ECDSA code.
 	 */
-	passert(pk11_data->oid.len < 256);
-	SECKEYECParams *pk11_param = SECITEM_AllocItem(NULL, NULL, (2 + pk11_data->oid.len));
-	pk11_param->type = siBuffer,
-	pk11_param->data[0] = SEC_ASN1_OBJECT_ID;
-	pk11_param->data[1] = pk11_data->oid.len;
-	memcpy(pk11_param->data + 2, pk11_data->oid.data, pk11_data->oid.len);
-	if (DBGP(DBG_CRYPT)) {
-		LLOG_JAMBUF(DEBUG_STREAM, logger, buf) {
-			jam_string(buf, "pk11_param");
-			jam_nss_secitem(buf, pk11_param);
-		}
+	const SECOidData *ec_oid = SECOID_FindOIDByTag(group->nss_oid); /*static*/
+	if (ec_oid == NULL) {
+		llog_passert(logger, HERE,
+			     "lookup of OID %d for EC group %s parameters failed",
+			     group->nss_oid, group->common.fqn);
+	}
+	SECKEYECParams *ec_params = SEC_ASN1EncodeItem(NULL/*must-double-free*/,
+						       NULL, &ec_oid->oid,
+						       SEC_ObjectIDTemplate);
+	if (ec_params == NULL) {
+		llog_passert(logger, HERE,
+			     "wrapping of OID %d EC group %s parameters failed",
+			     group->nss_oid, group->common.fqn);
 	}
 
-	*privk = SECKEY_CreateECPrivateKey(pk11_param, pubk,
+
+	*privk = SECKEY_CreateECPrivateKey(ec_params, pubk,
 					   lsw_nss_get_password_context(logger));
 
-	SECITEM_FreeItem(pk11_param, PR_TRUE);
+	SECITEM_FreeItem(ec_params, PR_TRUE/*also-free-SECItem*/);
 
 	if (*pubk == NULL || *privk == NULL) {
 		passert_nss_error(logger, HERE,
@@ -99,24 +92,27 @@ static void nss_ecp_calc_local_secret(const struct dh_desc *group,
 	}
 }
 
-static chunk_t nss_ecp_clone_local_secret_ke(const struct dh_desc *group,
-					     const SECKEYPublicKey *local_pubk)
+/*
+ * NSS sometimes includes the EC_POINT_FORM_UNCOMPRESSED prefix but
+ * what is needed is the plain EC coordinate without that prefix (see
+ * documentation in pk11_get_EC_PointLenInBytes()).
+ */
+static shunk_t nss_ecp_local_secret_ke(const struct dh_desc *group,
+				       const SECKEYPublicKey *local_pubk)
 {
-#ifdef USE_DH31
-	if (group->nss_oid == SEC_OID_CURVE25519) {
-		/*
-		 * NSS returns the plain EC X-point (see documentation
-		 * in pk11_get_EC_PointLenInBytes(), and that is what
-		 * needs to go over the wire.
-		 */
-		passert(local_pubk->u.ec.publicValue.len == group->bytes);
-		DBG_log("putting NSS raw CURVE25519 public key blob on wire");
-		return clone_bytes_as_chunk(local_pubk->u.ec.publicValue.data, group->bytes, "ECP KE");
+	if (group->nss_adds_ec_point_form_uncompressed) {
+		passert(local_pubk->u.ec.publicValue.data[0] == EC_POINT_FORM_UNCOMPRESSED);
+		passert(local_pubk->u.ec.publicValue.len == group->bytes + 1);
+		return shunk2(local_pubk->u.ec.publicValue.data + 1, group->bytes);
 	}
-#endif
-	passert(local_pubk->u.ec.publicValue.data[0] == EC_POINT_FORM_UNCOMPRESSED);
-	passert(local_pubk->u.ec.publicValue.len == group->bytes + 1);
-	return clone_bytes_as_chunk(local_pubk->u.ec.publicValue.data + 1, group->bytes, "ECP KE");
+	/*
+	 * NSS returns the plain EC X-point (see documentation
+	 * in pk11_get_EC_PointLenInBytes(), and that is what
+	 * needs to go over the wire.
+	 */
+	passert(local_pubk->u.ec.publicValue.len == group->bytes);
+	dbg("putting NSS raw CURVE25519 public key blob on wire");
+	return same_secitem_as_shunk(local_pubk->u.ec.publicValue);
 }
 
 static diag_t nss_ecp_calc_shared_secret(const struct dh_desc *group,
@@ -150,8 +146,16 @@ static diag_t nss_ecp_calc_shared_secret(const struct dh_desc *group,
 	}
 	/* must NSS-free remote_pubk.u.ec.publicValue */
 
-#ifdef USE_DH31
-	if (group->nss_oid == SEC_OID_CURVE25519) {
+	if (group->nss_adds_ec_point_form_uncompressed) {
+		/*
+		 * NSS returns and expects the encoded EC X-point pair
+		 * as the public part; but prefixed by
+		 * EC_POINT_FORM_COMPRESSED.
+		 */
+		passert(remote_ke.len + 1 == local_pubk->u.ec.publicValue.len);
+		remote_pubk.u.ec.publicValue.data[0] = EC_POINT_FORM_UNCOMPRESSED;
+		memcpy(remote_pubk.u.ec.publicValue.data + 1, remote_ke.ptr, remote_ke.len);
+	} else {
 		/*
 		 * NSS returns and expects the raw EC X-point as the
 		 * public part.  The raw remote KE matches this format
@@ -160,20 +164,7 @@ static diag_t nss_ecp_calc_shared_secret(const struct dh_desc *group,
 		passert(remote_ke.len == local_pubk->u.ec.publicValue.len);
 		DBG_log("passing raw CURVE25519 public key blob to NSS");
 		memcpy(remote_pubk.u.ec.publicValue.data, remote_ke.ptr, remote_ke.len);
-	} else {
-#endif
-		/*
-		 * NSS returns and expects the encoded EC X-point as
-		 * the public part.  Need to encode the raw remote KE
-		 * so it matches (which is easy, just prefix the
-		 * uncompressed tag to the raw value).
-		 */
-		passert(remote_ke.len + 1 == local_pubk->u.ec.publicValue.len);
-		remote_pubk.u.ec.publicValue.data[0] = EC_POINT_FORM_UNCOMPRESSED;
-		memcpy(remote_pubk.u.ec.publicValue.data + 1, remote_ke.ptr, remote_ke.len);
-#ifdef USE_DH31
 	}
-#endif
 
 	/*
 	 * XXX: The "result type" can be nearly everything.  Use
@@ -227,6 +218,6 @@ const struct dh_ops ike_alg_dh_nss_ecp_ops = {
 	.backend = "NSS(ECP)",
 	.check = nss_ecp_check,
 	.calc_local_secret = nss_ecp_calc_local_secret,
-	.clone_local_secret_ke = nss_ecp_clone_local_secret_ke,
+	.local_secret_ke = nss_ecp_local_secret_ke,
 	.calc_shared_secret = nss_ecp_calc_shared_secret,
 };

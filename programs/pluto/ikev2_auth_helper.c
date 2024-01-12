@@ -38,7 +38,7 @@ struct task {
 	const struct crypt_mac hash_to_sign;
 	const struct hash_desc *hash_algo;
 	v2_auth_signature_cb *cb;
-	const struct private_key_stuff *pks;
+	const struct secret_stuff *pks;
 	const struct pubkey_signer *signer;
 	/* out */
 	struct hash_signature signature;
@@ -59,7 +59,8 @@ bool submit_v2_auth_signature(struct ike_sa *ike,
 			      const struct crypt_mac *hash_to_sign,
 			      const struct hash_desc *hash_algo,
 			      const struct pubkey_signer *signer,
-			      v2_auth_signature_cb *cb)
+			      v2_auth_signature_cb *cb,
+			      where_t where)
 {
 	const struct connection *c = ike->sa.st_connection;
 	struct task task = {
@@ -77,15 +78,14 @@ bool submit_v2_auth_signature(struct ike_sa *ike,
 
 	submit_task(ike->sa.st_logger, &ike->sa /*state to resume*/,
 		    clone_thing(task, "signature task"),
-		    &v2_auth_signature_handler,
-		    "computing responder signature");
+		    &v2_auth_signature_handler, where);
 	return true;
 }
 
 static struct hash_signature v2_auth_signature(struct logger *logger,
 					       const struct crypt_mac *hash_to_sign,
 					       const struct hash_desc *hash_algo,
-					       const struct private_key_stuff *pks,
+					       const struct secret_stuff *pks,
 					       const struct pubkey_signer *signer)
 {
 	passert(hash_to_sign->len <= sizeof(hash_to_sign->ptr/*array*/)); /*hint to coverity*/

@@ -132,8 +132,12 @@ struct config_end {
 };
 
 struct ike_info {
+	/* 1|2 */
 	enum ike_version version;
+	/* IKEv1|IKEv2 */
 	const char *version_name;
+	/* [IKE_SA] = ISAKMP SA | IKE SA */
+	/* [IPSEC_SA = IPsec SA | Child SA */
 	const char *sa_type_name[SA_TYPE_ROOF];
 };
 
@@ -146,6 +150,8 @@ struct config {
 
 	deltatime_t retransmit_interval; /* initial retransmit time, doubles each time */
 	deltatime_t retransmit_timeout; /* max time for one packet exchange attempt */
+	uintmax_t sa_ipsec_max_bytes;
+	uintmax_t sa_ipsec_max_packets;
 
 	lset_t sighash_policy;
 	enum shunt_policy prospective_shunt;	/* before */
@@ -460,13 +466,6 @@ struct connection {
 	struct pluto_xfrmi *xfrmi; /* pointer to possibly shared interface */
 
 	reqid_t sa_reqid;
-	/*
-	 * XXX: this field is used by the kernel to remember the mode
-	 * that the IPsec SA was installed as so that the delete knows
-	 * how to delete it.  Shouldn't that be part of the CHILD SA's
-	 * state?
-	 */
-	int ipsec_mode;			/* tunnel or transport or IKEv1 ... */
 
 	bool nat_keepalive;		/* Send NAT-T Keep-Alives if we are behind NAT */
 	bool mobike;			/* Allow MOBIKE */
@@ -515,7 +514,7 @@ struct connection {
 
 	enum send_ca_policy send_ca;
 
-	struct ip_pool *pool; /* IPv4 addresspool as a range, start end */
+	struct addresspool *pool; /* IPv4 addresspool as a range, start end */
 
 	uint32_t metric;	/* metric for tunnel routes */
 	uint16_t connmtu;	/* mtu for tunnel routes */
@@ -667,8 +666,6 @@ struct spd_route *eclipsing(const struct spd_route *sr);
 
 /* print connection status */
 
-extern void show_one_connection(struct show *s,
-				const struct connection *c);
 extern void show_connections_status(struct show *s);
 extern int connection_compare(const struct connection *ca,
 			      const struct connection *cb);

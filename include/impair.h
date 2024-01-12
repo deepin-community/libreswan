@@ -159,10 +159,21 @@ struct impair {
 	bool ignore_v2_ike_auth_child;
 
 	bool event_check_crls;
+	bool ignore_soft_expire;
+	bool ignore_hard_expire;
+
+	enum impair_emit v1_isakmp_delete_payload;
+	enum impair_emit v1_ipsec_delete_payload;
+
+	unsigned v2_delete_protoid;
+	unsigned v2n_rekey_sa_protoid;
+	unsigned v2_proposal_protoid;
 
 	/*
 	 * add more here
 	 */
+
+	unsigned v1_remote_quick_id;
 
 };
 

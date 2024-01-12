@@ -40,7 +40,7 @@ west #
 000 "west":   our auth:secret, their auth:secret, our autheap:none, their autheap:none;
 000 "west":   modecfg info: us:none, them:none, modecfg policy:push, dns:unset, domains:unset, cat:unset;
 000 "west":   sec_label:unset;
-000 "west":   ike_life: 28800s; ipsec_life: 28800s; replay_window: 128; rekey_margin: 540s; rekey_fuzz: 100%; keyingtries: 0;
+000 "west":   ike_life: 28800s; ipsec_life: 28800s; ipsec_max_bytes: 2^63B; ipsec_max_packets: 2^63; replay_window: 128; rekey_margin: 540s; rekey_fuzz: 100%; keyingtries: 0;
 000 "west":   retransmit-interval: 9999ms; retransmit-timeout: 99s; iketcp:no; iketcp-port:4500;
 000 "west":   initial-contact:no; cisco-unity:no; fake-strongswan:no; send-vendorid:no; send-no-esp-tfc:no;
 000 "west":   policy: IKEv2+PSK+ENCRYPT+TUNNEL+PFS+IKE_FRAG_ALLOW+ESN_NO+ESN_YES;
@@ -50,20 +50,20 @@ west #
 000 "west":   our idtype: ID_FQDN; our id=@west; their idtype: ID_FQDN; their id=@east
 000 "west":   liveness: passive; dpdaction:hold; dpddelay:0s; retransmit-timeout:15s
 000 "west":   nat-traversal: encaps:auto; keepalive:20s
-000 "west":   newest ISAKMP SA: #0; newest IPsec SA: #0; conn serial: $1;
+000 "west":   newest IKE SA: #0; newest IPsec SA: #0; conn serial: $1;
 west #
  ipsec auto --up west
 1v2 "west" #1: initiating IKEv2 connection
-1v2 "west" #1: sent IKE_SA_INIT request
+1v2 "west" #1: sent IKE_SA_INIT request to 192.1.2.23:500
 1v2 "west" #1: sent IKE_AUTH request {cipher=AES_GCM_16_256 integ=n/a prf=HMAC_SHA2_512 group=MODP2048}
-003 "west" #1: initiator established IKE SA; authenticated using authby=secret and peer ID_FQDN '@east'
+003 "west" #1: initiator established IKE SA; authenticated peer using authby=secret and ID_FQDN '@east'
 004 "west" #2: initiator established Child SA using #1; IPsec tunnel [192.1.2.45-192.1.2.45:0-65535 0] -> [192.1.2.23-192.1.2.23:0-65535 0] {ESP/ESN=>0xESPESP <0xESPESP xfrm=AES_GCM_16_256-NONE DPD=passive}
 west #
  ../../guestbin/ping-once.sh --up 192.1.2.23
 up
 west #
  ipsec trafficstatus
-006 #2: "west", type=ESP, add_time=1234567890, inBytes=84, outBytes=84, id='@east'
+006 #2: "west", type=ESP, add_time=1234567890, inBytes=84, outBytes=84, maxBytes=2^63B, id='@east'
 west #
  # this rekey, #2->#3, should succeed
 west #
@@ -100,9 +100,9 @@ west #
 west #
  cat /tmp/pluto.log | sed -n -e 's/^[^|#]*: \([^#|].* #[1-5]:\)/\1/p'
 "west" #1: initiating IKEv2 connection
-"west" #1: sent IKE_SA_INIT request
+"west" #1: sent IKE_SA_INIT request to 192.1.2.23:500
 "west" #1: sent IKE_AUTH request {cipher=AES_GCM_16_256 integ=n/a prf=HMAC_SHA2_512 group=MODP2048}
-"west" #1: initiator established IKE SA; authenticated using authby=secret and peer ID_FQDN '@east'
+"west" #1: initiator established IKE SA; authenticated peer using authby=secret and ID_FQDN '@east'
 "west" #2: initiator established Child SA using #1; IPsec tunnel [192.1.2.45-192.1.2.45:0-65535 0] -> [192.1.2.23-192.1.2.23:0-65535 0] {ESP/ESN=>0xESPESP <0xESPESP xfrm=AES_GCM_16_256-NONE DPD=passive}
 "west" #3: initiating rekey to replace Child SA #2
 "west" #3: sent CREATE_CHILD_SA request to rekey IPsec SA

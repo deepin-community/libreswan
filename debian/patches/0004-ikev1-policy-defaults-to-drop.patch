@@ -33,10 +33,10 @@ index 17d1747..3bd6702 100644
  for processing.
  </para>
 diff --git a/include/ipsecconf/keywords.h b/include/ipsecconf/keywords.h
-index a6c02ba..9b24d11 100644
+index 256d3f0..ac181eb 100644
 --- a/include/ipsecconf/keywords.h
 +++ b/include/ipsecconf/keywords.h
-@@ -112,7 +112,7 @@ enum keyword_numeric_config_field {
+@@ -108,7 +108,7 @@ enum keyword_numeric_config_field {
  
  	KBF_LISTEN_TCP,		/* listen on TCP port 4500 - default no */
  	KBF_LISTEN_UDP,		/* listen on UDP port 500/4500 - default yes */
@@ -46,10 +46,10 @@ index a6c02ba..9b24d11 100644
  };
  
 diff --git a/lib/libipsecconf/confread.c b/lib/libipsecconf/confread.c
-index b685b63..29353eb 100644
+index b95c90a..338fba9 100644
 --- a/lib/libipsecconf/confread.c
 +++ b/lib/libipsecconf/confread.c
-@@ -95,6 +95,7 @@ static void ipsecconf_default_values(struct starter_config *cfg)
+@@ -98,6 +98,7 @@ static void ipsecconf_default_values(struct starter_config *cfg)
  	/* Don't inflict BSI requirements on everyone */
  	SOPT(KBF_SEEDBITS, 0);
  	SOPT(KBF_DROP_OPPO_NULL, false);
@@ -58,10 +58,10 @@ index b685b63..29353eb 100644
  #ifdef HAVE_LABELED_IPSEC
  	SOPT(KBF_SECCTX, SECCTX);
 diff --git a/programs/pluto/server.c b/programs/pluto/server.c
-index 1685b46..6259b4d 100644
+index f72c321..3154cf3 100644
 --- a/programs/pluto/server.c
 +++ b/programs/pluto/server.c
-@@ -187,12 +187,7 @@ bool pluto_listen_tcp = false;
+@@ -183,12 +183,7 @@ bool pluto_listen_tcp = false;
  enum ddos_mode pluto_ddos_mode = DDOS_AUTO; /* default to auto-detect */
  
  enum global_ikev1_policy pluto_ikev1_pol =
@@ -72,5 +72,5 @@ index 1685b46..6259b4d 100644
  	GLOBAL_IKEv1_DROP;
 -#endif
  
- #ifdef HAVE_SECCOMP
+ #ifdef USE_SECCOMP
  enum seccomp_mode pluto_seccomp_mode = SECCOMP_DISABLED;

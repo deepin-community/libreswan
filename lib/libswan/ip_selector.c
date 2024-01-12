@@ -63,7 +63,7 @@ bool selector_contains_one_address(const ip_selector selector)
 	}
 
 	/* Unlike subnetishost() this rejects 0.0.0.0/32. */
-	return (!thingeq(selector.bytes, unset_bytes) &&
+	return (!thingeq(selector.bytes, unset_ip_bytes) &&
 		selector.maskbits == afi->mask_cnt &&
 		selector.ipproto == 0 &&
 		selector.hport == 0);
@@ -326,12 +326,22 @@ ip_selector selector_from_subnet_protoport(const ip_subnet subnet,
 
 const struct ip_info *selector_type(const ip_selector *selector)
 {
-	if (selector_is_unset(selector)) {
+	if (selector == NULL) {
 		return NULL;
 	}
 
 	/* may return NULL */
-	return ip_version_info(selector->version);
+	return selector_info(*selector);
+}
+
+const struct ip_info *selector_info(const ip_selector selector)
+{
+	if (!selector.is_set) {
+		return NULL;
+	}
+
+	/* may return NULL */
+	return ip_version_info(selector.version);
 }
 
 ip_port selector_port(const ip_selector selector)
@@ -360,14 +370,14 @@ ip_range selector_range(const ip_selector selector)
 		return unset_range;
 	}
 
-	struct ip_bytes start = bytes_from_blit(afi, selector.bytes,
-						/*routing-prefix*/&keep_bits,
-						/*host-identifier*/&clear_bits,
-						selector.maskbits);
-	struct ip_bytes end = bytes_from_blit(afi, selector.bytes,
-					      /*routing-prefix*/&keep_bits,
-					      /*host-identifier*/&set_bits,
-					      selector.maskbits);
+	struct ip_bytes start = ip_bytes_from_blit(afi, selector.bytes,
+						   /*routing-prefix*/&keep_bits,
+						   /*host-identifier*/&clear_bits,
+						   selector.maskbits);
+	struct ip_bytes end = ip_bytes_from_blit(afi, selector.bytes,
+						 /*routing-prefix*/&keep_bits,
+						 /*host-identifier*/&set_bits,
+						 selector.maskbits);
 	return range_from_raw(HERE, afi->ip_version, start, end);
 }
 
@@ -395,10 +405,10 @@ ip_address selector_prefix_mask(const ip_selector selector)
 		return unset_address;
 	}
 
-	struct ip_bytes prefix = bytes_from_blit(afi, selector.bytes,
-						 /*routing-prefix*/ &set_bits,
-						 /*host-identifier*/ &clear_bits,
-						 selector.maskbits);
+	struct ip_bytes prefix = ip_bytes_from_blit(afi, selector.bytes,
+						    /*routing-prefix*/ &set_bits,
+						    /*host-identifier*/ &clear_bits,
+						    selector.maskbits);
 	return address_from_raw(HERE, afi->ip_version, prefix);
 }
 
@@ -465,11 +475,11 @@ bool selector_in_selector(const ip_selector i, const ip_selector o)
 	}
 
 	/* ib=i.prefix[0 .. o.bits] == ob=o.prefix[0 .. o.bits] */
-	struct ip_bytes ib = bytes_from_blit(afi,
-					     /*INNER*/i.bytes,
-					     /*routing-prefix*/&keep_bits,
-					     /*host-identifier*/&clear_bits,
-					     /*OUTER*/o.maskbits);
+	struct ip_bytes ib = ip_bytes_from_blit(afi,
+						/*INNER*/i.bytes,
+						/*routing-prefix*/&keep_bits,
+						/*host-identifier*/&clear_bits,
+						/*OUTER*/o.maskbits);
 	if (!thingeq(ib, o.bytes)) {
 		return false;
 	}
@@ -605,9 +615,12 @@ err_t numeric_to_selector(shunk_t input,
 
 	uintmax_t prefix_bits = afi->mask_cnt;
 	if (prefix_bits_token.len > 0) {
-		oops = shunk_to_uintmax(prefix_bits_token, NULL, 0, &prefix_bits, afi->mask_cnt);
+		oops = shunk_to_uintmax(prefix_bits_token, NULL, 0, &prefix_bits);
 		if (oops != NULL) {
 			return oops;
+		}
+		if (prefix_bits > afi->mask_cnt) {
+			return "too large";
 		}
 	} else if (prefix_bits_token.ptr != NULL) {
 		/* found but empty */
@@ -615,11 +628,11 @@ err_t numeric_to_selector(shunk_t input,
 		return "missing prefix bit size";
 	}
 
-	struct ip_bytes host = bytes_from_blit(afi, address.bytes,
-					       /*routing-prefix*/&clear_bits,
-					       /*host-identifier*/&keep_bits,
-					       prefix_bits);
-	if (!thingeq(host, unset_bytes)) {
+	struct ip_bytes host = ip_bytes_from_blit(afi, address.bytes,
+						  /*routing-prefix*/&clear_bits,
+						  /*host-identifier*/&keep_bits,
+						  prefix_bits);
+	if (!thingeq(host, unset_ip_bytes)) {
 		return "host-identifier must be zero";
 	}
 
@@ -656,9 +669,12 @@ err_t numeric_to_selector(shunk_t input,
 	ip_port port = unset_port;
 	if (port_token.len > 0) {
 		uintmax_t hport;
-		err_t oops = shunk_to_uintmax(port_token, NULL, 0, &hport, 0xFFFF);
+		err_t oops = shunk_to_uintmax(port_token, NULL, 0, &hport);
 		if (oops != NULL) {
 			return oops;
+		}
+		if (hport > 65535) {
+			return "too large";
 		}
 		if (protocol == &ip_protocol_all && hport != 0) {
 			return "a non-zero port requires a valid protocol";

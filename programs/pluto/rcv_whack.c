@@ -77,7 +77,7 @@
 #include "iface.h"
 #include "show.h"
 #include "impair_message.h"
-#ifdef HAVE_SECCOMP
+#ifdef USE_SECCOMP
 #include "pluto_seccomp.h"
 #endif
 #include "server_fork.h"		/* for show_process_status() */
@@ -261,68 +261,113 @@ static void do_whacklisten(struct logger *logger)
 /*
  * Handle: whack --keyid <id> [--addkey] [--pubkeyrsa <key>]\n"
  *
- * whack --keyid <id>
+ *                                               key  addkey pubkey
+ * whack --keyid <id>                             y      n      n
  *     delete <id> key
- * whack --keyid <id> --pubkeyrsa ...
+ * whack --keyid <id> --pubkeyrsa ...             y      n      y
  *     replace <id> key
- * whack --keyid <id> --addkey --pubkeyrsa ...
+ * whack --keyid <id> --addkey --pubkeyrsa ...    y      y      y
  *     add <id> key (keeping any old key)
  * whack --keyid <id> --addkey
  *     invalid as public key is missing (keyval.len is 0)
  */
 static void key_add_request(const struct whack_message *msg, struct logger *logger)
 {
-	/* A (public) key requires a (key) type and a type requires a key */
+	bool given_key = msg->keyval.len > 0;
 
-	const struct pubkey_type *type = pubkey_alg_type(msg->pubkey_alg);
-	bool given_key = type != NULL;	/* were we given a key by the whack command? */
+	/*
+	 * Figure out the key type.
+	 */
 
-	passert(given_key == (msg->keyval.len != 0));
+	const struct pubkey_type *type;
+	switch (msg->pubkey_alg) {
+	case IPSECKEY_ALGORITHM_RSA:
+		type = &pubkey_type_rsa;
+		break;
+	case IPSECKEY_ALGORITHM_ECDSA:
+		type = &pubkey_type_ecdsa;
+		break;
+	case IPSECKEY_ALGORITHM_X_PUBKEY:
+		type = NULL;
+		break;
+	default:
+		if (msg->pubkey_alg != 0) {
+			llog_pexpect(logger, HERE, "unrecognized algorithm type %u", msg->pubkey_alg);
+			return;
+		}
+		type = NULL;
+	}
 
-	/* --addkey always requires a key */
+	enum_buf pkb;
+	dbg("processing key=%s addkey=%s given_key=%s alg=%s(%d)",
+	    bool_str(msg->whack_key),
+	    bool_str(msg->whack_addkey),
+	    bool_str(given_key),
+	    str_enum(&ipseckey_algorithm_config_names, msg->pubkey_alg, &pkb),
+	    msg->pubkey_alg);
+
+	/*
+	 * Adding must have a public key.
+	 */
 	if (msg->whack_addkey && !given_key) {
 		llog(RC_LOG_SERIOUS, logger,
-			    "error: key to add is empty (needs DNS lookup?)");
+		     "error: key to add is empty (needs DNS lookup?)");
 		return;
 	}
 
-	struct id keyid;
+	struct id keyid; /* must free keyid */
 	err_t ugh = atoid(msg->keyid, &keyid); /* must free keyid */
 	if (ugh != NULL) {
 		llog(RC_BADID, logger,
-			    "bad --keyid \"%s\": %s", msg->keyid, ugh);
+		     "bad --keyid \"%s\": %s", msg->keyid, ugh);
 		return;
 	}
 
-	/* if no --addkey: delete any preexisting keys */
+	/*
+	 * Delete any old key.
+	 *
+	 * No --addkey just means that is no existing key to delete.
+	 * For instance !add with a key means replace.
+	 */
 	if (!msg->whack_addkey) {
 		if (!given_key) {
 			/* XXX: this gets called by "add" so be silent */
 			llog(LOG_STREAM/*not-whack*/, logger,
-				    "delete keyid %s", msg->keyid);
+			     "delete keyid %s", msg->keyid);
 		}
 		delete_public_keys(&pluto_pubkeys, &keyid, type);
 		/* XXX: what about private keys; suspect not easy as not 1:1? */
 	}
 
-	/* if a key was given: add it */
-	if (given_key) {
-		/* XXX: this gets called by "add" so be silent */
+	/*
+	 * Add the new key.
+	 *
+	 * No --addkey with a key means replace.
+	 */
+ 	if (given_key) {
+
+		/*
+		 * A key was given: add it.
+		 *
+		 * XXX: this gets called by "add" so be silent.
+		 */
 		llog(LOG_STREAM/*not-whack*/, logger,
-			    "add keyid %s", msg->keyid);
-		DBG_dump_hunk(NULL, msg->keyval);
+		     "add keyid %s", msg->keyid);
+		if (DBGP(DBG_BASE)) {
+			DBG_dump_hunk(NULL, msg->keyval);
+		}
 
 		/* add the public key */
 		struct pubkey *pubkey = NULL; /* must-delref */
-		err_t ugh = add_public_key(&keyid, PUBKEY_LOCAL, type,
-					   /*install_time*/realnow(),
-					   /*until_time*/realtime_epoch,
-					   /*ttl*/0,
-					   &msg->keyval,
-					   &pubkey/*new-public-key:must-delref*/,
-					   &pluto_pubkeys);
-		if (ugh != NULL) {
-			llog(RC_LOG_SERIOUS, logger, "%s", ugh);
+		diag_t d = unpack_dns_ipseckey(&keyid, PUBKEY_LOCAL, msg->pubkey_alg,
+					       /*install_time*/realnow(),
+					       /*until_time*/realtime_epoch,
+					       /*ttl*/0,
+					       HUNK_AS_SHUNK(msg->keyval),
+					       &pubkey/*new-public-key:must-delref*/,
+					       &pluto_pubkeys);
+		if (d != NULL) {
+			llog_diag(RC_LOG_SERIOUS, logger, &d, "%s", "");
 			free_id_content(&keyid);
 			return;
 		}
@@ -330,7 +375,7 @@ static void key_add_request(const struct whack_message *msg, struct logger *logg
 		/* try to pre-load the private key */
 		bool load_needed;
 		const ckaid_t *ckaid = pubkey_ckaid(pubkey);
-		pubkey_delref(&pubkey, HERE);
+		pubkey_delref(&pubkey);
 		err_t err = preload_private_key_by_ckaid(ckaid, &load_needed, logger);
 		if (err != NULL) {
 			dbg("no private key: %s", err);
@@ -840,7 +885,7 @@ static void whack_process(const struct whack_message *const m, struct show *s)
 
 	if (m->whack_status) {
 		dbg_whack(s, "start: status");
-		show_status(s);
+		show_status(s, now);
 		dbg_whack(s, "stop: status");
 	}
 
@@ -894,11 +939,11 @@ static void whack_process(const struct whack_message *const m, struct show *s)
 
 	if (m->whack_show_states) {
 		dbg_whack(s, "start: showstates");
-		show_states(s);
+		show_states(s, now);
 		dbg_whack(s, "stop: showstates");
 	}
 
-#ifdef HAVE_SECCOMP
+#ifdef USE_SECCOMP
 	if (m->whack_seccomp_crashtest) {
 		dbg_whack(s, "start: seccomp_crashtest");
 		/*
@@ -931,8 +976,8 @@ static void whack_process(const struct whack_message *const m, struct show *s)
 					    "OK: seccomp security was not enabled and the rogue syscall was blocked");
 				break;
 			case SECCOMP_ENABLED:
-				llog(RC_LOG_SERIOUS, logger,
-					    "ERROR: pluto seccomp was enabled but the rogue syscall did not terminate pluto!");
+				llog_error(logger, 0/*no-errno*/,
+					   "pluto seccomp was enabled but the rogue syscall did not terminate pluto!");
 				break;
 			default:
 				bad_case(pluto_seccomp_mode);
@@ -942,16 +987,16 @@ static void whack_process(const struct whack_message *const m, struct show *s)
 				    "pluto: seccomp test syscall was not blocked");
 			switch (pluto_seccomp_mode) {
 			case SECCOMP_TOLERANT:
-				llog(RC_LOG_SERIOUS, logger,
-					    "ERROR: pluto seccomp was tolerant but the rogue syscall was not blocked!");
+				llog_error(logger, 0/*no-errno*/,
+					   "pluto seccomp was tolerant but the rogue syscall was not blocked!");
 				break;
 			case SECCOMP_DISABLED:
 				llog(RC_LOG_SERIOUS, logger,
 					    "OK: pluto seccomp was disabled and the rogue syscall was not blocked");
 				break;
 			case SECCOMP_ENABLED:
-				llog(RC_LOG_SERIOUS, logger,
-					    "ERROR: pluto seccomp was enabled but the rogue syscall was not blocked!");
+				llog_error(logger, 0/*no-errno*/,
+					   "pluto seccomp was enabled but the rogue syscall was not blocked!");
 				break;
 			default:
 				bad_case(pluto_seccomp_mode);
@@ -1008,8 +1053,8 @@ static void whack_handle(struct fd *whackfd, struct logger *whack_logger)
 
 	ssize_t n = fd_read(whackfd, &msg, sizeof(msg));
 	if (n <= 0) {
-		log_errno(whack_logger, -(int)n,
-			  "read() failed in whack_handle()");
+		llog_error(whack_logger, -(int)n,
+			   "read() failed in whack_handle()");
 		return;
 	}
 
@@ -1059,7 +1104,7 @@ static void whack_handle(struct fd *whackfd, struct logger *whack_logger)
 			/* Only basic commands.  Simpler inter-version compatibility. */
 			if (msg.whack_status) {
 				struct show *s = alloc_show(whack_logger);
-				show_status(s);
+				show_status(s, mononow());
 				free_show(&s);
 			}
 			/* bail early, but without complaint */

@@ -1,4 +1,7 @@
-
+ifndef top_srcdir
+include ../../mk/dirs.mk
+endif
+include $(top_srcdir)/mk/config.mk
 
 INSTINITSYSTEMFLAGS ?= $(INSTBINFLAGS)
 
@@ -23,6 +26,7 @@ local-install-base: $(INITSYSTEMFILES)
 		mkdir -p $(INITSYSTEMEXAMPLESDIR) ; \
 		$(INSTALL) $(INSTBINFLAGS) $(builddir)/$(file) $(INITSYSTEMEXAMPLESDIR)/$(file) ; \
 	)
+ifneq ($(BSD_VARIANT),openbsd)
 	@. /etc/rc.subr ; \
 	load_rc_config pluto ; \
 	case " $$rc_directories " in \
@@ -39,14 +43,15 @@ local-install-base: $(INITSYSTEMFILES)
 		echo "" ; \
 		;; \
 	esac
+endif
 
 list-local-base:
 	@set -eu $(foreach file, $(INITSYSTEMFILES), ; echo $(FINALINITSYSTEMDIR)/$(file))
 	@set -eu $(foreach file, $(INITSYSTEMFILES), ; echo $(INITSYSTEMEXAMPLESDIR)/$(file))	)
 
-ifndef top_srcdir
-include ../../mk/dirs.mk
-endif
-include $(top_srcdir)/mk/config.mk
 include $(top_srcdir)/mk/targets.mk
 include $(top_srcdir)/mk/rules.mk
+
+# assumes a single word
+pluto: $(BSD_VARIANT).sh $(TRANSFORM_DEPS) | $(builddir)
+	$(transform_script)

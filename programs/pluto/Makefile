@@ -51,6 +51,7 @@ OBJS =
 OBJS += send.o
 
 ifeq ($(USE_IKEv1),true)
+OBJS += ikev1_cert.o
 OBJS += ikev1_send.o
 OBJS += ikev1_peer_id.o
 endif
@@ -65,6 +66,7 @@ OBJS += ikev2_create_child_sa.o
 OBJS += ikev2_informational.o
 # payloads
 OBJS += ikev2_cert.o
+OBJS += ikev2_certreq.o
 OBJS += ikev2_notify.o
 OBJS += ikev2_cp.o
 OBJS += ikev2_ts.o
@@ -99,18 +101,16 @@ USERLAND_INCLUDES += -I${LIBRESWANSRCDIR}/programs/pluto/linux-extra-if-link
 endif
 endif
 
-ifeq ($(USE_GLIBC_KERN_FLIP_HEADERS),true)
-USERLAND_CFLAGS += -DGLIBC_KERN_FLIP_HEADERS
-endif
-
 # kernel
 
 OBJS += kernel.o
 OBJS += kernel_ops.o
 OBJS += kernel_alg.o
 
-ifeq ($(filter true, $(sort $(USE_BSDKAME) $(USE_PFKEYV2))),true)
+ifeq ($(USE_PFKEYV2),true)
 OBJS += kernel_sadb.o
+OBJS += kernel_sadb_names.o
+OBJS += kernel_sadb_logger.o
 endif
 
 ifeq ($(USE_XFRM),true)
@@ -120,14 +120,11 @@ OBJS += kernel_xfrm_interface.o
 endif
 endif
 
-ifeq ($(USE_BSDKAME),true)
-OBJS += kernel_bsdkame.o
-endif
-
 ifeq ($(USE_PFKEYV2),true)
 OBJS += kernel_pfkeyv2.o
 endif
 
+# PKIX: Public-Key Infrastructure using X.509
 OBJS += x509.o
 OBJS += fetch.o
 OBJS += crl_queue.o
@@ -176,6 +173,7 @@ OBJS += ikev1_db_ops.o
 USERLAND_LDFLAGS += $(SECCOMP_LDFLAGS)
 USERLAND_LDFLAGS += $(SSL_LDFLAGS)
 USERLAND_LDFLAGS += $(NSS_SMIME_LDFLAGS)
+USERLAND_LDFLAGS += $(NSS_UTIL_LDFLAGS)
 USERLAND_LDFLAGS += $(NSS_LDFLAGS)
 USERLAND_LDFLAGS += $(NSPR_LDFLAGS)
 
@@ -210,9 +208,7 @@ USERLAND_LDFLAGS += $(LINUX_AUDIT_LDFLAGS)
 
 OBJS += linux_audit.o
 
-USERLAND_LDFLAGS += -levent
-USERLAND_LDFLAGS += -levent_pthreads
-
+USERLAND_LDFLAGS += $(LIBEVENT_LDFLAGS)
 USERLAND_LDFLAGS += $(LDAP_LDFLAGS)
 
 OBJS += connections.o
@@ -220,7 +216,10 @@ OBJS += connection_db.o
 OBJS += initiate.o terminate.o ikev2_rekey_now.o
 OBJS += pending.o crypto.o defs.o
 OBJS += ike_spi.o
-OBJS += foodgroups.o log.o state.o plutomain.o plutoalg.o
+OBJS += foodgroups.o
+OBJS += log.o
+OBJS += log_limiter.o
+OBJS += state.o plutomain.o plutoalg.o
 OBJS += revival.o
 OBJS += orient.o
 OBJS += server.o
@@ -244,14 +243,14 @@ endif
 OBJS += ikev2.o ikev2_parent.o ikev2_child.o
 OBJS += ikev2_proposals.o
 OBJS += ikev2_states.o
-OBJS += ikev2_rsa.o ikev2_psk.o ikev2_ppk.o ikev2_crypto.o
+OBJS += ikev2_psk.o ikev2_ppk.o ikev2_crypto.o
 OBJS += ikev2_redirect.o
 OBJS += cert_decode_helper.o
 OBJS += rcv_whack.o pluto_stats.o
 OBJS += demux.o msgdigest.o keys.o
 OBJS += crypt_ke.o crypt_dh.o
 OBJS += crypt_dh_v2.o
-OBJS += rnd.o
+OBJS += hourly.o
 OBJS += ikev1_vendorid.o
 OBJS += ikev2_vendorid.o
 OBJS += nat_traversal.o
@@ -264,14 +263,13 @@ OBJS += root_certs.o
 OBJS += pluto_timing.o
 OBJS += pluto_shutdown.o
 OBJS += nss_cert_reread.o
+OBJS += rekeyfuzz.o
+
 
 # Archives
 OBJS += $(LIBRESWANLIB)
 OBJS += $(WHACKLIB)
 OBJS += $(IPSECCONFLIB)
 OBJS += $(LIBRESWANLIB)
-ifeq ($(USE_BSDKAME),true)
-OBJS += $(BSDPFKEYLIB)
-endif
 
 include $(top_srcdir)/mk/program.mk

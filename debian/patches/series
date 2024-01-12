@@ -1,3 +1,6 @@
 0001-do-not-use-git-version.patch
 0002-debian-pam.d-pluto.patch
 0004-ikev1-policy-defaults-to-drop.patch
+0004-Include-features.h-to-enable-NSPR-workaround-for-854.patch
+0006-fix-gcc13-build-error.patch
+0007-fix-build-error-on-deepin.patch

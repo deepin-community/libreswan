@@ -37,6 +37,7 @@
 #include "ike_alg_hash.h"
 #include "secrets.h"
 #include "peer_id.h"
+#include "ikev1_cert.h"
 
 static bool decode_peer_id(struct state *st, struct msg_digest *md, struct id *peer);
 
@@ -278,9 +279,11 @@ stf_status oakley_auth(struct msg_digest *md, bool initiator)
 	case OAKLEY_RSA_SIG:
 	{
 		shunk_t signature = pbs_in_left_as_shunk(&md->chain[ISAKMP_NEXT_SIG]->pbs);
-		diag_t d = authsig_and_log_using_pubkey(ike_sa(st, HERE), &hash, signature,
+		diag_t d = authsig_and_log_using_pubkey(ike_sa(st, HERE),
+							&hash, signature,
 							&ike_alg_hash_sha1, /*always*/
-							&pubkey_signer_raw_rsa);
+							&pubkey_signer_raw_rsa,
+							NULL/*legacy-signature-name*/);
 		if (d != NULL) {
 			llog_diag(RC_LOG_SERIOUS, st->st_logger, &d, "%s", "");
 			dbg("received message SIG_%s data did not match computed value",

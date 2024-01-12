@@ -210,9 +210,8 @@ static stf_status isakmp_add_attr(pb_stream *strattr,
 	switch (attr_type) {
 	case INTERNAL_IP4_ADDRESS:
 	{
-		diag_t d = pbs_out_address(&attrval, ia, "IP_addr");
-		if (d != NULL) {
-			llog_diag(RC_LOG_SERIOUS, attrval.outs_logger, &d, "%s", "");
+		if (!pbs_out_address(&attrval, ia, "IP_addr")) {
+			/* already logged */
 			return STF_INTERNAL_ERROR;
 		}
 		break;
@@ -220,17 +219,14 @@ static stf_status isakmp_add_attr(pb_stream *strattr,
 
 	case INTERNAL_IP4_SUBNET:
 	{
-		diag_t d;
 		ip_address addr = selector_prefix(c->spd.this.client);
-		d = pbs_out_address(&attrval, addr, "IP4_subnet(address)");
-		if (d != NULL) {
-			llog_diag(RC_LOG_SERIOUS, attrval.outs_logger, &d, "%s", "");
+		if (!pbs_out_address(&attrval, addr, "IP4_subnet(address)")) {
+			/* already logged */
 			return STF_INTERNAL_ERROR;
 		}
 		ip_address mask = selector_prefix_mask(c->spd.this.client);
-		d = pbs_out_address(&attrval, mask, "IP4_subnet(mask)");
-		if (d != NULL) {
-			llog_diag(RC_LOG_SERIOUS, attrval.outs_logger, &d, "%s", "");
+		if (!pbs_out_address(&attrval, mask, "IP4_subnet(mask)")) {
+			/* already logged */
 			return STF_INTERNAL_ERROR;
 		}
 		break;
@@ -238,11 +234,9 @@ static stf_status isakmp_add_attr(pb_stream *strattr,
 
 	case INTERNAL_IP4_NETMASK:
 	{
-		diag_t d;
 		ip_address mask = selector_prefix_mask(c->spd.this.client);
-		d = pbs_out_address(&attrval, mask, "IP4_netmask");
-		if (d != NULL) {
-			llog_diag(RC_LOG_SERIOUS, attrval.outs_logger, &d, "%s", "");
+		if (!pbs_out_address(&attrval, mask, "IP4_netmask")) {
+			/* already logged */
 			return STF_INTERNAL_ERROR;
 		}
 		break;
@@ -262,9 +256,8 @@ static stf_status isakmp_add_attr(pb_stream *strattr,
 		     dns != NULL && dns->is_set; dns++) {
 
 			/* emit attribute's value */
-			diag_t d = pbs_out_address(&attrval, *dns, "IP4_dns");
-			if (d != NULL) {
-				llog_diag(RC_LOG_SERIOUS, attrval.outs_logger, &d, "%s", "");
+			if (!pbs_out_address(&attrval, *dns, "IP4_dns")) {
+				/* already logged */
 				return STF_INTERNAL_ERROR;
 			}
 
@@ -909,17 +902,16 @@ static bool add_xauth_addresspool(struct connection *c,
 	/* delete existing pool if it exists */
 	if (c->pool != NULL) {
 		free_that_address_lease(c);
-		unreference_addresspool(c);
+		addresspool_delref(&c->pool);
 	}
 
-	diag_t d = install_addresspool(pool_range, &c->pool);
+	diag_t d = install_addresspool(pool_range, c);
 	if (d != NULL) {
 		llog_diag(RC_CLASH, logger, &d, "XAUTH: invalid addresspool for the conn %s user %s: ",
 			 c->name, userid);
 		return false;
 	}
 
-	reference_addresspool(c);
 	return true;
 }
 
@@ -2017,8 +2009,7 @@ static stf_status xauth_client_resp(struct state *st,
 						    st->st_xauth_username,
 						    s);
 						if (s != NULL) {
-							struct private_key_stuff
-								*pks = lsw_get_pks(s);
+							struct secret_stuff *pks = get_secret_stuff(s);
 
 							st->st_xauth_password = clone_hunk(pks->u.preshared_secret,
 											   "saved xauth password");
@@ -2396,7 +2387,6 @@ stf_status xauth_inI1(struct state *st, struct msg_digest *md)
 	bool got_status = false;
 	unsigned int status = XAUTH_STATUS_FAIL;
 	stf_status stat;
-	lset_t xauth_resp = LEMPTY;	/* ??? value never used */
 
 	dbg("xauth_inI1");
 
@@ -2431,7 +2421,6 @@ stf_status xauth_inI1(struct state *st, struct msg_digest *md)
 
 			switch (attr.isaat_af_type) {
 			case XAUTH_STATUS | ISAKMP_ATTR_AF_TV:
-				xauth_resp |= XAUTHLELEM(XAUTH_STATUS);
 				got_status = true;
 				switch (attr.isaat_lv) {
 				case XAUTH_STATUS_FAIL:

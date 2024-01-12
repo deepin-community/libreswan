@@ -5,10 +5,8 @@
 %global with_cavstests 1
 # There is no new enough unbound on rhel7
 %global with_dnssec 0
-%global nss_version 3.36.0-7.1
+%global nss_version 3.79-4
 # Libreswan config options
-# For RHEL7 we need USE_NSS_KDF=false and USE_FIPSCHECK=true
-# Note that this means libreswan needs its own FIPS certification
 %global libreswan_config \\\
     FINALLIBEXECDIR=%{_libexecdir}/ipsec \\\
     FINALMANDIR=%{_mandir} \\\
@@ -17,17 +15,17 @@
     PREFIX=%{_prefix} \\\
     PYTHON_BINARY=%{__python2} \\\
     SHELL_BINARY=/bin/sh \\\
+    USE_AUTHPAM=true \\\
     USE_DNSSEC=%{USE_DNSSEC} \\\
-    USE_FIPSCHECK=true \\\
+    USE_FIPSCHECK=false \\\
     USE_LABELED_IPSEC=true \\\
     USE_LDAP=true \\\
     USE_LIBCAP_NG=true \\\
     USE_LIBCURL=true \\\
     USE_NM=true \\\
     USE_NSS_IPSEC_PROFILE=true \\\
-    USE_NSS_KDF=false \\\
+    USE_NSS_KDF=true \\\
     USE_SECCOMP=true \\\
-    USE_AUTHPAM=true \\\
     USE_XFRM_INTERFACE_IFLA_HEADER=true \\\
 %{nil}
 
@@ -35,7 +33,7 @@
 
 Name: libreswan
 Summary: Internet Key Exchange (IKEv1 and IKEv2) implementation for IPsec
-Version: 4.7
+Version: 4.12
 Release: %{?prever:0.}1%{?prever:.%{prever}}%{?dist}
 License: GPLv2
 Url: https://libreswan.org/
@@ -50,7 +48,6 @@ BuildRequires: gcc make
 BuildRequires: audit-libs-devel
 BuildRequires: bison
 BuildRequires: curl-devel
-BuildRequires: fipscheck-devel
 BuildRequires: flex
 BuildRequires: hostname
 BuildRequires: libcap-ng-devel
@@ -78,7 +75,6 @@ Requires: unbound-libs >= 1.6.0
 %global USE_DNSSEC false
 %endif
 Requires: coreutils
-Requires: fipscheck%{_isa}
 Requires: iproute
 Requires: logrotate
 Requires: nss >= %{nss_version}
@@ -122,19 +118,11 @@ make %{?_smp_mflags} \
 %if 0%{with_efence}
     USE_EFENCE=true \
 %endif
-    WERROR_CFLAGS="-Werror -Wno-error=address -Wno-missing-braces -Wno-missing-field-initializers" \
     USERLINK="%{?__global_ldflags}" \
+    WERROR_CFLAGS="-Werror -Wno-error=address -Wno-missing-braces -Wno-missing-field-initializers" \
     %{libreswan_config} \
     programs
 FS=$(pwd)
-
-# Add generation of HMAC checksums of the final stripped binaries
-%define __spec_install_post \
-    %{?__debug_package:%{__debug_install_post}} \
-    %{__arch_install_post} \
-    %{__os_install_post} \
-    fipshmac -d %{buildroot}%{_libdir}/fipscheck %{buildroot}%{_libexecdir}/ipsec/pluto
-%{nil}
 
 %install
 make \
@@ -151,11 +139,6 @@ install -d %{buildroot}%{_sbindir}
 install -d %{buildroot}%{_sysctldir}
 install -m 0644 packaging/rhel/libreswan-sysctl.conf \
     %{buildroot}%{_sysctldir}/50-libreswan.conf
-
-mkdir -p %{buildroot}%{_libdir}/fipscheck
-install -d %{buildroot}%{_sysconfdir}/prelink.conf.d/
-install -m644 packaging/rhel/libreswan-prelink.conf \
-    %{buildroot}%{_sysconfdir}/prelink.conf.d/libreswan-fips.conf
 
 echo "include /etc/ipsec.d/*.secrets" \
     > %{buildroot}%{_sysconfdir}/ipsec.secrets
@@ -199,7 +182,6 @@ certutil -N -d sql:$tmpdir --empty-password
 %post
 %systemd_post ipsec.service
 %sysctl_apply 50-libreswan.conf
-prelink -u %{_libexecdir}/ipsec/* 2>/dev/null || :
 
 %preun
 %systemd_preun ipsec.service
@@ -225,11 +207,7 @@ prelink -u %{_libexecdir}/ipsec/* 2>/dev/null || :
 %{_sbindir}/ipsec
 %{_libexecdir}/ipsec
 %doc %{_mandir}/*/*
-%{_libdir}/fipscheck/pluto.hmac
-# We own the directory so we don't have to require prelink
-%dir %{_sysconfdir}/prelink.conf.d/
-%{_sysconfdir}/prelink.conf.d/libreswan-fips.conf
 
 %changelog
-* Tue May 24 2022 Team Libreswan <team@libreswan.org> - 4.7-1
+* Tue Aug  8 2023 Team Libreswan <team@libreswan.org> - 4.12-1
 - Automated build from release tar ball

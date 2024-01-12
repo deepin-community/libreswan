@@ -97,6 +97,7 @@
 #include "ikev2_child.h"
 #include "ikev2_child.h"
 #include "ikev2_create_child_sa.h"	/* for ikev2_rekey_ike_start() */
+#include "rekeyfuzz.h"
 
 bool accept_v2_nonce(struct logger *logger, struct msg_digest *md,
 		     chunk_t *dest, const char *name)
@@ -309,17 +310,15 @@ bool emit_v2KE(chunk_t g, const struct dh_desc *group,
 		llog(RC_LOG, outs->outs_logger,
 			    "IMPAIR: sending bogus KE (g^x) == %u value to break DH calculations", byte);
 		/* Only used to test sending/receiving bogus g^x */
-		diag_t d = pbs_out_repeated_byte(&kepbs, byte, g.len, "ikev2 impair KE (g^x) == 0");
-		if (d != NULL) {
-			llog_diag(RC_LOG_SERIOUS, outs->outs_logger, &d, "%s", "");
-			return false;
+		if (!pbs_out_repeated_byte(&kepbs, byte, g.len, "ikev2 impair KE (g^x) == 0")) {
+			/* already logged */
+			return false; /*fatal*/
 		}
 	} else if (impair.ke_payload == IMPAIR_EMIT_EMPTY) {
 		llog(RC_LOG, outs->outs_logger, "IMPAIR: sending an empty KE value");
-		diag_t d = pbs_out_zero(&kepbs, 0, "ikev2 impair KE (g^x) == empty");
-		if (d != NULL) {
-			llog_diag(RC_LOG_SERIOUS, outs->outs_logger, &d, "%s", "");
-			return false;
+		if (!pbs_out_zero(&kepbs, 0, "ikev2 impair KE (g^x) == empty")) {
+			/* already logged */
+			return false; /*fatal*/
 		}
 	} else {
 		if (!out_hunk(g, &kepbs, "ikev2 g^x"))
@@ -498,7 +497,6 @@ void schedule_v2_replace_event(struct state *st)
 	case IPSEC_SA: lifetime = c->sa_ipsec_life_seconds; break;
 	default: bad_case(st->st_establishing_sa);
 	}
-	intmax_t delay = deltasecs(lifetime);
 
 	enum event_type kind;
 	const char *story;
@@ -513,43 +511,28 @@ void schedule_v2_replace_event(struct state *st)
 		kind = EVENT_SA_REPLACE;
 		story = "IKE SA with policy re-authenticate";
 	} else {
-		/*
-		 * Important policy lies buried here.  For example, we
-		 * favour the initiator over the responder by making
-		 * the initiator start rekeying sooner.  Also, fuzz is
-		 * only added to the initiator's margin.
-		 *
-		 * Unwrapped deltatime_t is in seconds.
-		 */
-		intmax_t marg = deltasecs(c->sa_rekey_margin);
-		switch (st->st_sa_role) {
-		case SA_INITIATOR:
-			marg += marg *
-				c->sa_rekey_fuzz / 100.E0 *
-				(rand() / (RAND_MAX + 1.E0));
-			break;
-		case SA_RESPONDER:
-			marg /= 2;
-			break;
-		default:
-			bad_case(st->st_sa_role);
-		}
+		deltatime_t marg = fuzz_rekey_margin(st->st_sa_role,
+						     c->sa_rekey_margin,
+						     c->sa_rekey_fuzz/*percent*/);
 
-		intmax_t rekey_delay = delay - marg;
-
-		if (rekey_delay > 0) {
-			/*
-			 * Time to rekey/reauth; scheduled once during
-			 * a state's lifetime.
-			 */
-			dbg("#%lu will start re-keying in %jd seconds (replace in %jd seconds)",
-			    st->st_serialno, rekey_delay, delay);
-			event_schedule(EVENT_v2_REKEY, deltatime(rekey_delay), st);
-			pexpect(st->st_v2_refresh_event->ev_type == EVENT_v2_REKEY);
-			story = "attempting re-key";
+		deltatime_t rekey_delay;
+		if (deltatime_cmp(lifetime, >, marg)) {
+			rekey_delay = deltatime_sub(lifetime, marg);
 		} else {
-			story = "margin to small for re-key";
+			rekey_delay = lifetime;
+			marg = deltatime(0);
 		}
+		st->st_replace_margin = marg;
+
+		/* Time to rekey/reauth; scheduled once during a state's lifetime.*/
+		deltatime_buf rdb, lb;
+		dbg(PRI_SO" will start re-keying in %s seconds (replace in %s seconds)",
+		    st->st_serialno,
+		    str_deltatime(rekey_delay, &rdb),
+		    str_deltatime(lifetime, &lb));
+		event_schedule(EVENT_v2_REKEY, rekey_delay, st);
+		pexpect(st->st_v2_refresh_event->ev_type == EVENT_v2_REKEY);
+		story = "attempting re-key";
 
 		kind = EVENT_SA_REPLACE;
 	}
@@ -558,16 +541,17 @@ void schedule_v2_replace_event(struct state *st)
 	 * This is the drop-dead event.
 	 */
 	passert(kind == EVENT_SA_REPLACE || kind == EVENT_SA_EXPIRE);
-	dbg("#%lu will %s in %jd seconds (%s)",
+	deltatime_buf lb;
+	dbg(PRI_SO" will %s in %s seconds (%s)",
 	    st->st_serialno,
 	    kind == EVENT_SA_EXPIRE ? "expire" : "be replaced",
-	    delay, story);
+	    str_deltatime(lifetime, &lb), story);
 
 	/*
 	 * Schedule the lifetime (death) event.  Only happens once
 	 * when the state is established.
 	 */
-	event_schedule(kind, deltatime(delay), st);
+	event_schedule(kind, lifetime, st);
 	pexpect(st->st_v2_lifetime_event->ev_type == kind);
 }
 

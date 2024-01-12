@@ -1,6 +1,3 @@
-KVM_FEDORA_ISO_URL = https://download.fedoraproject.org/pub/fedora/linux/releases/35/Server/x86_64/iso/Fedora-Server-dvd-x86_64-35-1.2.iso
-KVM_FEDORA_KICKSTART_FILE = testing/libvirt/fedora/base.ks
-
 #
 # NSS+NSPR
 #
@@ -68,9 +65,9 @@ kvm-fedora-nspr-rpms:
 # empty.  XL2TPD sucks in the latest kernel so is included in the
 # list.
 #
-# KVM_FEDORA_KERNEL_RPMDIR ?= /source/kernel
+# KVM_FEDORA_KERNEL_RPMDIR ?= /pool/kernel
 # KVM_FEDORA_KERNEL_ARCH ? = x86_64
-# KVM_FEDORA_KERNEL_VERSION ?= 5.8.0-0.rc1.1.fc33.$(KERNEL_ARCH).rpm
+# KVM_FEDORA_KERNEL_VERSION ?= -5.8.0-0.rc1.1.fc33.$(KERNEL_ARCH).rpm
 
 KVM_FEDORA_KERNEL_RPMDIR ?=
 KVM_FEDORA_KERNEL_VERSION ?=
@@ -79,7 +76,7 @@ KVM_FEDORA_KERNEL_PACKAGE_NAMES ?= \
 	kernel \
 	kernel-core \
 	kernel-devel \
-	kernel-headers \
+	$(kernel-headers) \
 	kernel-modules \
 	kernel-modules-extra \
 	$(NULL)
@@ -112,16 +109,18 @@ kvm-fedora-kernel-prms:
 #   https://nohats.ca/ftp/strongswan/strongswan-5.8.4-2.fc30.x86_64.rpm \
 #   libgcrypt
 
+# upgrade.sh expects: install-packages -- upgrade-packates
+KVM_FEDORA_UPGRADE_FLAGS += \
+	$(KVM_FEDORA_INSTALL_PACKAGES) \
+	-- \
+	$(KVM_FEDORA_UPGRADE_PACKAGES)
+
 KVM_FEDORA_STRONGSWAN_PACKAGES = strongswan libgcrypt
 
+KVM_FEDORA_INSTALL_PACKAGES += $(KVM_FEDORA_KERNEL_PACKAGES)
+KVM_FEDORA_INSTALL_PACKAGES += $(KVM_FEDORA_UPGRADE_PACKAGES)
+KVM_FEDORA_INSTALL_PACKAGES += $(KVM_FEDORA_DEBUGINFO_PACKAGES)
 
-KVM_FEDORA_INSTALL_FLAGS += $(KVM_FEDORA_INSTALL_PACKAGES)
-KVM_FEDORA_INSTALL_PACKAGES += \
-    $(KVM_FEDORA_KERNEL_PACKAGES) \
-    $(KVM_FEDORA_UPGRADE_PACKAGES) \
-    $(KVM_FEDORA_DEBUGINFO_PACKAGES)
-
-KVM_FEDORA_UPGRADE_FLAGS += $(KVM_FEDORA_UPGRADE_PACKAGES)
 KVM_FEDORA_UPGRADE_PACKAGES += \
     ElectricFence \
     audit-libs-devel \
@@ -159,6 +158,7 @@ KVM_FEDORA_UPGRADE_PACKAGES += \
     mtr \
     nc \
     net-tools \
+    nftables \
     nmap \
     nsd \
     $(KVM_FEDORA_NSPR_PACKAGES) \

@@ -33,18 +33,18 @@
 
 struct connection;
 struct RSA_private_key;
-struct RSA_public_key;
+struct pubkey_content;
 struct pubkey;
 struct pubkey_type;
 struct crypt_mac;
 struct packet_byte_stream;
-struct private_key_stuff;
+struct secret_stuff;
 struct hash_desc;
 struct show;
 struct ike_sa;
 struct pubkey_signer;
 
-const struct private_key_stuff *get_local_private_key(const struct connection *c,
+const struct secret_stuff *get_local_private_key(const struct connection *c,
 						      const struct pubkey_type *type,
 						      struct logger *logger);
 
@@ -75,6 +75,7 @@ extern diag_t authsig_and_log_using_pubkey(struct ike_sa *ike,
 					   const struct crypt_mac *hash,
 					   shunk_t signature,
 					   const struct hash_desc *hash_algo,
-					   const struct pubkey_signer *signer);
+					   const struct pubkey_signer *signer,
+					   const char *signature_payload_name);
 
 #endif /* _KEYS_H */

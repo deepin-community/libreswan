@@ -2,14 +2,13 @@
  * names_constant.h
  */
 #include <sys/types.h>
-#include <libreswan.h>
 
 extern enum_names ip_protocol_id_names;	/* aka ipproto_*; in ip_protocol.c */
 
 extern enum_names sa_policy_bit_names;
 extern enum_names dpd_action_names;
 #ifdef KERNEL_XFRM
-extern enum_names netkey_sa_dir_names;
+extern enum_names xfrm_policy_names;
 #endif
 extern enum_names sd_action_names;
 extern enum_names stf_status_names;
@@ -30,7 +29,6 @@ extern enum_names *const oakley_attr_val_descs[];
 extern const unsigned int oakley_attr_val_descs_roof;
 extern enum_names ipsec_attr_names;
 extern enum_names *const ipsec_attr_val_descs[];
-extern const unsigned int ipsec_attr_val_descs_roof;
 extern enum_names sa_lifetime_names;
 extern enum_names encapsulation_mode_names;
 extern enum_names auth_alg_names;
@@ -106,7 +104,7 @@ extern uint16_t secctx_attr_type;
 
 extern enum_names natt_method_names;
 
-extern enum_names private_key_kind_names;
+extern enum_names secret_kind_names;
 extern enum_names ikev2_ppk_id_type_names;
 
 /* natt traversal types */

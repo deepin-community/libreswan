@@ -24,9 +24,9 @@ initdone
 west #
  ipsec auto --up other
 1v2 "other" #1: initiating IKEv2 connection
-1v2 "other" #1: sent IKE_SA_INIT request
+1v2 "other" #1: sent IKE_SA_INIT request to 192.1.2.23:500
 1v2 "other" #1: sent IKE_AUTH request {cipher=AES_GCM_16_256 integ=n/a prf=HMAC_SHA2_512 group=MODP2048}
-003 "other" #1: initiator established IKE SA; authenticated using RSASSA-PSS with SHA2_512 and peer certificate '@othereast.other.libreswan.org' issued by CA 'C=CA, ST=Ontario, L=Toronto, O=Libreswan, OU=Test Department, CN=Libreswan test CA for otherca, E=testing@libreswan.org'
+003 "other" #1: initiator established IKE SA; authenticated peer '3nnn-bit RSASSA-PSS with SHA2_512' digital signature using peer certificate '@othereast.other.libreswan.org' issued by CA 'C=CA, ST=Ontario, L=Toronto, O=Libreswan, OU=Test Department, CN=Libreswan test CA for otherca, E=testing@libreswan.org'
 004 "other" #2: initiator established Child SA using #1; IPsec tunnel [192.1.2.45-192.1.2.45:0-65535 0] -> [192.1.2.23-192.1.2.23:0-65535 0] {ESP/ESN=>0xESPESP <0xESPESP xfrm=AES_GCM_16_256-NONE DPD=passive}
 west #
  echo "done"
@@ -35,6 +35,6 @@ west #
  # we should see conn other being up
 west #
  ipsec whack --trafficstatus
-006 #2: "other", type=ESP, add_time=1234567890, inBytes=0, outBytes=0, id='@othereast.other.libreswan.org'
+006 #2: "other", type=ESP, add_time=1234567890, inBytes=0, outBytes=0, maxBytes=2^63B, id='@othereast.other.libreswan.org'
 west #
  

@@ -191,6 +191,17 @@ jam_bytes_fn jam_dump_bytes;
 	})
 
 /*
+ * bytes as base64 ...
+ */
+
+jam_bytes_fn jam_base64_bytes;
+#define jam_base64_hunk(BUF, HUNK)					\
+	({								\
+		typeof(HUNK) hunk_ = (HUNK); /* evaluate once */	\
+		jam_base64_bytes(BUF, hunk_.ptr, hunk_.len);		\
+	})
+
+/*
  * bytes as a string.
  */
 
@@ -209,6 +220,24 @@ jam_bytes_fn jam_shell_quoted_bytes;
 		typeof(HUNK) hunk_ = (HUNK); /* evaluate once */	\
 		jam_shell_quoted_bytes(BUF, hunk_.ptr, hunk_.len);	\
 	})
+
+/*
+ * jam_humber():
+ *
+ * Make large numbers clearer by expressing them as Ki, Mi, Gi, Ti,
+ * Pi, Ei and 2^64 will be 16Ei based on
+ * https://en.wikipedia.org/wiki/Binary_prefix IEC 60027-2 standard.
+ * The prefix and suffix2 are literally copied into the output.
+ * e.g. use sufix2 "B" for Bytes.
+ */
+
+typedef struct {
+	/* lets say 3 decimal digits per byte which is way over */
+	char buf[sizeof(uintmax_t)*3 + 2/*Gi*/ + 1/*NUL*/ + 1/*CANARY*/];
+}  humber_buf;
+
+size_t jam_humber(struct jambuf *buf, uintmax_t num);
+const char *str_humber(uintmax_t num, humber_buf *b);
 
 /*
  * Code wrappers that cover up the details of allocating,

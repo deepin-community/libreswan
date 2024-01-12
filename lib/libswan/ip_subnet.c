@@ -76,10 +76,10 @@ err_t address_mask_to_subnet(const ip_address address,
 		return "invalid mask";
 	}
 
-	struct ip_bytes prefix = bytes_from_blit(afi, address.bytes,
-						 /*routing-prefix*/&keep_bits,
-						 /*host-identifier*/&clear_bits,
-						 prefix_bits);
+	struct ip_bytes prefix = ip_bytes_from_blit(afi, address.bytes,
+						    /*routing-prefix*/&keep_bits,
+						    /*host-identifier*/&clear_bits,
+						    prefix_bits);
 	*subnet = subnet_from_raw(HERE, afi->ip_version, prefix, prefix_bits);
 	return NULL;
 }
@@ -92,21 +92,31 @@ ip_address subnet_prefix(const ip_subnet subnet)
 		return unset_address;
 	}
 
-	struct ip_bytes prefix = bytes_from_blit(afi, subnet.bytes,
-						 /*routing-prefix*/&keep_bits,
-						 /*host-identifier*/&clear_bits,
-						 subnet.maskbits);
+	struct ip_bytes prefix = ip_bytes_from_blit(afi, subnet.bytes,
+						    /*routing-prefix*/&keep_bits,
+						    /*host-identifier*/&clear_bits,
+						    subnet.maskbits);
 	return address_from_raw(HERE, afi->ip_version, prefix);
 }
 
 const struct ip_info *subnet_type(const ip_subnet *subnet)
 {
-	if (subnet_is_unset(subnet)) {
+	if (subnet == NULL) {
 		return NULL;
 	}
 
-	/* may be NULL */
-	return ip_version_info(subnet->version);
+	/* may return NULL */
+	return subnet_info(*subnet);
+}
+
+const struct ip_info *subnet_info(const ip_subnet subnet)
+{
+	if (!subnet.is_set) {
+		return NULL;
+	}
+
+	/* may return NULL */
+	return ip_version_info(subnet.version);
 }
 
 bool subnet_is_unset(const ip_subnet *subnet)
@@ -160,10 +170,10 @@ ip_address subnet_prefix_mask(const ip_subnet subnet)
 		return unset_address;
 	}
 
-	struct ip_bytes mask = bytes_from_blit(afi, subnet.bytes,
-					       /*routing-prefix*/ &set_bits,
-					       /*host-identifier*/ &clear_bits,
-					       subnet.maskbits);
+	struct ip_bytes mask = ip_bytes_from_blit(afi, subnet.bytes,
+						  /*routing-prefix*/ &set_bits,
+						  /*host-identifier*/ &clear_bits,
+						  subnet.maskbits);
 	return address_from_raw(HERE, afi->ip_version, mask);
 }
 
@@ -262,11 +272,11 @@ bool subnet_in_subnet(const ip_subnet l, const ip_subnet r)
 	}
 
 	/* L.prefix[0 .. R.bits] == R.prefix[0.. R.bits] */
-	struct ip_bytes lb = bytes_from_blit(afi,
-					     /*LEFT*/l.bytes,
-					     /*routing-prefix*/&keep_bits,
-					     /*host-identifier*/&clear_bits,
-					     /*RIGHT*/r.maskbits);
+	struct ip_bytes lb = ip_bytes_from_blit(afi,
+						/*LEFT*/l.bytes,
+						/*routing-prefix*/&keep_bits,
+						/*host-identifier*/&clear_bits,
+						/*RIGHT*/r.maskbits);
 	return thingeq(lb, r.bytes);
 }
 
@@ -282,11 +292,11 @@ bool address_in_subnet(const ip_address l, const ip_subnet r)
 	}
 
 	/* L.prefix[0 .. R.bits] == R.prefix[0.. R.bits] */
-	struct ip_bytes lb = bytes_from_blit(afi,
-					     /*LEFT*/l.bytes,
-					     /*routing-prefix*/&keep_bits,
-					     /*host-identifier*/&clear_bits,
-					     /*RIGHT*/r.maskbits);
+	struct ip_bytes lb = ip_bytes_from_blit(afi,
+						/*LEFT*/l.bytes,
+						/*routing-prefix*/&keep_bits,
+						/*host-identifier*/&clear_bits,
+						/*RIGHT*/r.maskbits);
 	return thingeq(lb, r.bytes);
 }
 

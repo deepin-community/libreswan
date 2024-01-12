@@ -19,6 +19,7 @@
     PREFIX=%{_prefix} \\\
     PYTHON_BINARY=%{__python3} \\\
     SHELL_BINARY=%{_bindir}/sh \\\
+    USE_AUTHPAM=true \\\
     USE_DNSSEC=true \\\
     USE_FIPSCHECK=false \\\
     USE_LABELED_IPSEC=true \\\
@@ -29,7 +30,6 @@
     USE_NM=true \\\
     USE_NSS_KDF=true \\\
     USE_SECCOMP=true \\\
-    USE_AUTHPAM=true \\\
 %{nil}
 
 #global prever dr1
@@ -37,7 +37,7 @@
 Name: libreswan
 Summary: IPsec implementation with IKEv1 and IKEv2 keying protocols
 # version is generated in the release script
-Version: 4.7
+Version: 4.12
 Release: %{?prever:0.}1%{?prever:.%{prever}}%{?dist}
 License: GPLv2
 Url: https://libreswan.org/
@@ -51,19 +51,20 @@ BuildRequires: audit-libs-devel
 BuildRequires: bison
 BuildRequires: curl-devel
 BuildRequires: flex
-BuildRequires: gcc make
+BuildRequires: gcc
+BuildRequires: hostname
 BuildRequires: ldns-devel
 BuildRequires: libcap-ng-devel
 BuildRequires: libevent-devel
 BuildRequires: libseccomp-devel
 BuildRequires: libselinux-devel
+BuildRequires: make
 BuildRequires: nspr-devel
 BuildRequires: nss-devel >= %{nss_version}
 BuildRequires: nss-tools
 BuildRequires: openldap-devel
 BuildRequires: pam-devel
 BuildRequires: pkgconfig
-BuildRequires: hostname
 BuildRequires: redhat-rpm-config
 BuildRequires: systemd-devel
 BuildRequires: unbound-devel >= %{unbound_version}
@@ -114,7 +115,6 @@ make %{?_smp_mflags} \
 %if 0%{with_efence}
     USE_EFENCE=true \
 %endif
-    WERROR_CFLAGS="-Werror -Wno-missing-field-initializers" \
     USERLINK="%{?__global_ldflags}" \
     %{libreswan_config} \
     programs
@@ -200,5 +200,5 @@ certutil -N -d sql:$tmpdir --empty-password
 %attr(0644,root,root) %doc %{_mandir}/*/*
 
 %changelog
-* Tue May 24 2022 Team Libreswan <team@libreswan.org> - 4.7-1
+* Tue Aug  8 2023 Team Libreswan <team@libreswan.org> - 4.12-1
 - Automated build from release tar ball

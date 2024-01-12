@@ -20,10 +20,25 @@
 
 #include "diag.h"
 #include "ip_endpoint.h"
-#include "libreswan.h"		/* for ipsec_spi_t */
+#include "ipsec_spi.h"		/* for ipsec_spi_t */
+#include "ttodata.h"
 #include "ip_protocol.h"
 
 struct jambuf;
+
+/*
+ * Magic SAID names for for passthrough SA.
+ */
+
+#define PASSTHROUGHNAME		"%passthrough"
+#define PASSTHROUGH4NAME        "%passthrough4"
+#define PASSTHROUGH6NAME        "%passthrough6"
+#define PASSTHROUGHIS		"tun0@0.0.0.0"
+#define PASSTHROUGH4IS		"tun0@0.0.0.0"
+#define PASSTHROUGH6IS		"tun0@::"
+#define PASSTHROUGHTYPE		"tun"
+#define PASSTHROUGHSPI		0
+#define PASSTHROUGHDST		0
 
 /*
  * Magic values for use in combination with ip_protocol_internal to
@@ -125,8 +140,10 @@ const char *str_said(const ip_said *said, said_buf *buf);
  * Details.
  */
 
-bool said_is_unset(const ip_said *said);
-const struct ip_info *said_type(const ip_said *said);
+bool said_is_unset(const ip_said *said);		/* handles NULL */
+const struct ip_info *said_type(const ip_said *said);	/* handles NULL */
+const struct ip_info *said_info(const ip_said said);
+
 ip_address said_address(const ip_said said);
 const struct ip_protocol *said_protocol(const ip_said said);
 

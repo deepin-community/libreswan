@@ -28,6 +28,7 @@
 #include "lswnss.h"
 #include "lswlog.h"
 #include "lswnss.h"
+#include "ttodata.h"
 
 /*
  * Return true IFF CKAID starts with all of START (which is in HEX).
@@ -76,10 +77,12 @@ const char *str_ckaid(const ckaid_t *ckaid, ckaid_buf *buf)
 
 ckaid_t ckaid_from_secitem(const SECItem *const nss_ckaid)
 {
-	ckaid_t ckaid = {
-		.len = nss_ckaid->len,
-	};
-	passert(ckaid.len <= sizeof(ckaid.ptr/*an-array*/));
+	size_t nss_ckaid_len = nss_ckaid->len;
+	/* ckaid = { .len = min(...), } barfs with gcc 11.2.1 */
+	ckaid_t ckaid = {0};
+	/* should not be truncated but can be */
+	ckaid.len = min(nss_ckaid_len, sizeof(ckaid.ptr/*array*/)),
+	pexpect(ckaid.len == nss_ckaid_len);
 	memmove(ckaid.ptr, nss_ckaid->data, ckaid.len);
 	return ckaid;
 }
@@ -92,46 +95,6 @@ SECItem same_ckaid_as_secitem(const ckaid_t *ckaid)
 		.type = siBuffer,
 	};
 	return nss_ckaid;
-}
-
-err_t form_ckaid_rsa(chunk_t modulus, ckaid_t *ckaid)
-{
-	/*
-	 * Compute the CKAID directly using the modulus. - keep old
-	 * configurations hobbling along.
-	 */
-	SECItem nss_modulus = same_chunk_as_secitem(modulus, siBuffer);
-	SECItem *nss_ckaid = PK11_MakeIDFromPubKey(&nss_modulus);
-	if (nss_ckaid == NULL) {
-		return "unable to compute 'CKAID' from modulus";
-	}
-	if (DBGP(DBG_BASE)) {
-		DBG_dump("computed rsa CKAID",
-			 nss_ckaid->data, nss_ckaid->len);
-	}
-	*ckaid = ckaid_from_secitem(nss_ckaid);
-	SECITEM_FreeItem(nss_ckaid, PR_TRUE);
-	return NULL;
-}
-
-err_t form_ckaid_ecdsa(chunk_t pub_value, ckaid_t *ckaid)
-{
-	/*
-	 * Compute the CKAID directly using the public value. - keep old
-	 * configurations hobbling along.
-	 */
-	SECItem nss_pub_value = same_chunk_as_secitem(pub_value, siBuffer);
-	SECItem *nss_ckaid = PK11_MakeIDFromPubKey(&nss_pub_value);
-	if (nss_ckaid == NULL) {
-		return "unable to compute 'CKAID' from public value";
-	}
-	if (DBGP(DBG_BASE)) {
-		DBG_dump("computed ecdsa CKAID",
-			 nss_ckaid->data, nss_ckaid->len);
-	}
-	*ckaid = ckaid_from_secitem(nss_ckaid);
-	SECITEM_FreeItem(nss_ckaid, PR_TRUE);
-	return NULL;
 }
 
 /* convert hex string ckaid to binary bin */

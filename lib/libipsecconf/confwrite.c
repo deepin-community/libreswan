@@ -80,7 +80,7 @@ static void confwrite_int(FILE *out,
 		case kt_appendlist:
 		case kt_filename:
 		case kt_dirname:
-		case kt_rsasigkey:
+		case kt_pubkey:
 
 		case kt_percent:
 		case kt_ipaddr:
@@ -161,9 +161,11 @@ static void confwrite_int(FILE *out,
 			break;
 
 		case kt_time: /* special number, but do work later XXX */
+		case kt_binary:
+		case kt_byte:
 		case kt_number:
 			if (options_set[k->field])
-				fprintf(out, "\t%s%s=%d\n", side, k->keyname,
+				fprintf(out, "\t%s%s=%jd\n", side, k->keyname,
 					options[k->field]);
 		}
 	}
@@ -210,7 +212,7 @@ static void confwrite_str(FILE *out,
 			}
 			break;
 
-		case kt_rsasigkey:
+		case kt_pubkey:
 		case kt_ipaddr:
 		case kt_range:
 		case kt_subnet:
@@ -228,6 +230,8 @@ static void confwrite_str(FILE *out,
 			break;
 
 		case kt_time:
+		case kt_binary:
+		case kt_byte:
 			/* special number, not a string */
 			break;
 
@@ -341,8 +345,12 @@ static void confwrite_side(FILE *out, struct starter_end *end)
 			str_cidr(&end->ifaceip, &as));
 	}
 
-	if (end->rsasigkey != NULL && end->rsasigkey[0] != '\0')
-		fprintf(out, "\t%srsasigkey=%s\n", side, end->rsasigkey);
+	if (end->pubkey != NULL && end->pubkey[0] != '\0') {
+		enum_buf pkb;
+		fprintf(out, "\t%s%s=%s\n", side,
+			str_enum(&ipseckey_algorithm_config_names, end->pubkey_alg, &pkb),
+			end->pubkey);
+	}
 
 	if (end->protoport.is_set) {
 		protoport_buf buf;

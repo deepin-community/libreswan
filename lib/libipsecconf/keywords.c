@@ -29,7 +29,6 @@
 #include <limits.h>
 #include <sys/socket.h>		/* for AF_INET/AF_INET6 */
 
-#include <libreswan.h>
 #include "constants.h"
 #include "lmod.h"
 #include "lswcdefs.h"		/* for elemsof() */
@@ -137,7 +136,7 @@ static const struct sparse_name kw_ddos_list[] = {
 	SPARSE_NULL
 };
 
-#ifdef HAVE_SECCOMP
+#ifdef USE_SECCOMP
 static const struct sparse_name kw_seccomp_list[] = {
 	{ "enabled", SECCOMP_ENABLED },
 	{ "disabled", SECCOMP_DISABLED },
@@ -223,9 +222,9 @@ static const struct sparse_name kw_type_list[] = {
 };
 
 /*
- * Values for rsasigkey={ %cert, %dnsondemand, %dns, literal }
+ * Values for {rsasigkey,ecdsakey,pubkey}={ %cert, %dnsondemand, %dns, literal }
  */
-static const struct sparse_name kw_rsasigkey_list[] = {
+static const struct sparse_name kw_pubkey_list[] = {
 	{ "",             PUBKEY_PREEXCHANGED },
 	{ "%cert",        PUBKEY_CERTIFICATE },
 #ifdef USE_DNSSEC
@@ -342,7 +341,6 @@ static const struct sparse_name kw_eap_list[] = {
 
 const struct keyword_def ipsec_conf_keywords[] = {
   { "ikev1-policy",  kv_config,  kt_enum,  KBF_GLOBAL_IKEv1,  kw_global_ikev1_list, NULL, },
-  { "interfaces",  kv_config,  kt_string,  KSF_INTERFACES, NULL, NULL, },
   { "curl-iface",  kv_config,  kt_string,  KSF_CURLIFACE, NULL, NULL, },
   { "curl-timeout",  kv_config,  kt_time,  KBF_CURLTIMEOUT_MS, NULL, NULL, },
 
@@ -384,15 +382,19 @@ const struct keyword_def ipsec_conf_keywords[] = {
   { "ocsp-method",  kv_config | kv_processed,  kt_enum,  KBF_OCSP_METHOD,  kw_ocsp_method_list, NULL, },
 
   { "ddos-mode",  kv_config | kv_processed ,  kt_enum,  KBF_DDOS_MODE,  kw_ddos_list, NULL, },
-#ifdef HAVE_SECCOMP
+#ifdef USE_SECCOMP
   { "seccomp",  kv_config | kv_processed ,  kt_enum,  KBF_SECCOMP,  kw_seccomp_list, NULL, },
 #endif
   { "ddos-ike-threshold",  kv_config,  kt_number,  KBF_DDOS_IKE_THRESHOLD, NULL, NULL, },
   { "max-halfopen-ike",  kv_config,  kt_number,  KBF_MAX_HALFOPEN_IKE, NULL, NULL, },
   { "ike-socket-bufsize",  kv_config,  kt_number,  KBF_IKEBUF, NULL, NULL, },
   { "ike-socket-errqueue",  kv_config,  kt_bool,  KBF_IKE_ERRQUEUE, NULL, NULL, },
+#if defined(HAVE_IPTABLES) || defined(HAVE_NFTABLES)
   { "nflog-all",  kv_config,  kt_number,  KBF_NFLOG_ALL, NULL, NULL, },
+#endif
+#ifdef XFRM_LIFETIME_DEFAULT
   { "xfrmlifetime",  kv_config,  kt_number,  KBF_XFRMLIFETIME, NULL, NULL, },
+#endif
   { "virtual-private",  kv_config,  kt_string,  KSF_VIRTUALPRIVATE, NULL, NULL, },
   { "virtual_private",  kv_config,  kt_string,  KSF_VIRTUALPRIVATE, NULL, NULL, }, /* obsolete variant, very common */
   { "seedbits",  kv_config,  kt_number,  KBF_SEEDBITS, NULL, NULL, },
@@ -409,6 +411,7 @@ const struct keyword_def ipsec_conf_keywords[] = {
   { "ikev1-secctx-attr-type",  kv_config,  kt_number,  KBF_SECCTX, NULL, NULL, },  /* obsolete: not a value, a type */
   { "secctx-attr-type",  kv_config | kv_alias,  kt_number,  KBF_SECCTX, NULL, NULL, },
 #endif
+  { "interfaces",  kv_config, kt_obsolete, KNCF_WARNIGNORE, NULL, NULL, }, /* obsoleted but often present keyword */
 
   /* these options are obsoleted (and not old aliases) */
 
@@ -429,7 +432,9 @@ const struct keyword_def ipsec_conf_keywords[] = {
   { "nexthop",  kv_conn | kv_leftright,  kt_ipaddr,  KSCF_NEXTHOP, NULL, NULL, },
   { "updown",  kv_conn | kv_leftright,  kt_filename,  KSCF_UPDOWN, NULL, NULL, },
   { "id",  kv_conn | kv_leftright,  kt_idtype,  KSCF_ID, NULL, NULL, },
-  { "rsasigkey",  kv_conn | kv_leftright,  kt_rsasigkey,  KSCF_RSASIGKEY,  kw_rsasigkey_list, NULL, },
+  { "rsasigkey",  kv_conn | kv_leftright,  kt_pubkey,  KSCF_RSASIGKEY,  kw_pubkey_list, NULL, },
+  { "ecdsakey",  kv_conn | kv_leftright,  kt_pubkey,  KSCF_ECDSAKEY,  kw_pubkey_list, NULL, },
+  { "pubkey",  kv_conn | kv_leftright,  kt_pubkey,  KSCF_PUBKEY,  kw_pubkey_list, NULL, },
   { "cert",  kv_conn | kv_leftright,  kt_filename,  KSCF_CERT, NULL, NULL, },
   { "ckaid",  kv_conn | kv_leftright,  kt_string,  KSCF_CKAID, NULL, NULL, },
   { "sendcert",  kv_conn | kv_leftright,  kt_enum,  KNCF_SENDCERT,  kw_sendcert_list, NULL, },
@@ -443,7 +448,9 @@ const struct keyword_def ipsec_conf_keywords[] = {
   { "xauthusername",  kv_conn | kv_leftright,  kt_string,  KSCF_USERNAME, NULL, NULL, }, /* old alias */
   { "addresspool",  kv_conn | kv_leftright,  kt_range,  KSCF_ADDRESSPOOL, NULL, NULL, },
   { "auth",  kv_conn | kv_leftright, kt_enum,  KNCF_AUTH,  kw_auth_list, NULL, },
+#ifdef HAVE_IPTABLES
   { "cat",  kv_conn | kv_leftright,  kt_bool,  KNCF_CAT, NULL, NULL, },
+#endif
   { "protoport",  kv_conn | kv_leftright | kv_processed,  kt_string,  KSCF_PROTOPORT, NULL, NULL, },
   { "autheap",  kv_conn | kv_leftright,  kt_enum,  KNCF_EAP,  kw_eap_list, NULL, },
 
@@ -485,9 +492,12 @@ const struct keyword_def ipsec_conf_keywords[] = {
   { "ms-dh-downgrade",  kv_conn,  kt_bool,  KNCF_MSDH_DOWNGRADE, NULL, NULL, },
   { "require-id-on-certificate",  kv_conn,  kt_bool,  KNCF_SAN_ON_CERT, NULL, NULL, },
   { "dns-match-id,",  kv_conn,  kt_bool,  KNCF_DNS_MATCH_ID, NULL, NULL, },
-  { "keylife",  kv_conn | kv_alias,  kt_time,  KNCF_SALIFETIME_MS, NULL, NULL, },
-  { "lifetime",  kv_conn | kv_alias,  kt_time,  KNCF_SALIFETIME_MS, NULL, NULL, },
-  { "salifetime",  kv_conn,  kt_time,  KNCF_SALIFETIME_MS, NULL, NULL, },
+  { "ipsec-max-bytes",  kv_conn,  kt_byte,  KNCF_IPSEC_MAXBYTES, NULL, NULL, },
+  { "ipsec-lifetime",  kv_conn,  kt_time,  KNCF_IPSEC_LIFETIME_MS, NULL, NULL, },
+  { "keylife",  kv_conn | kv_alias,  kt_time,  KNCF_IPSEC_LIFETIME_MS, NULL, NULL, }, /* old name */
+  { "lifetime",  kv_conn | kv_alias,  kt_time,  KNCF_IPSEC_LIFETIME_MS, NULL, NULL, }, /* old name */
+  { "salifetime",  kv_conn,  kt_time,  KNCF_IPSEC_LIFETIME_MS, NULL, NULL, }, /* old name */
+  { "ipsec-max-packets",  kv_conn,  kt_binary,  KNCF_IPSEC_MAXPACKETS, NULL, NULL, },
 
   { "retransmit-timeout",  kv_conn,  kt_time,  KNCF_RETRANSMIT_TIMEOUT_MS, NULL, NULL, },
   { "retransmit-interval",  kv_conn|kv_milliseconds,  kt_time,  KNCF_RETRANSMIT_INTERVAL_MS, NULL, NULL, },
@@ -537,7 +547,7 @@ const struct keyword_def ipsec_conf_keywords[] = {
   { "rekeyfuzz",  kv_conn,  kt_percent,  KNCF_REKEYFUZZ, NULL, NULL, },
   { "keyingtries",  kv_conn,  kt_number,  KNCF_KEYINGTRIES, NULL, NULL, },
   { "replay-window",  kv_conn,  kt_number,  KNCF_REPLAY_WINDOW, NULL, NULL, },
-  { "ikelifetime",  kv_conn,  kt_time,  KNCF_IKELIFETIME_MS, NULL, NULL, },
+  { "ikelifetime",  kv_conn,  kt_time,  KNCF_IKE_LIFETIME_MS, NULL, NULL, },
   { "failureshunt",  kv_conn,  kt_enum,  KNCF_FAILURESHUNT,  kw_failureshunt_list, NULL, },
   { "negotiationshunt",  kv_conn,  kt_enum,  KNCF_NEGOTIATIONSHUNT,  kw_negotiationshunt_list, NULL, },
 
@@ -569,7 +579,9 @@ const struct keyword_def ipsec_conf_keywords[] = {
   { "priority",  kv_conn,  kt_number,  KNCF_PRIORITY, NULL, NULL, },
   { "tfc",  kv_conn,  kt_number,  KNCF_TFCPAD, NULL, NULL, },
   { "reqid",  kv_conn,  kt_number,  KNCF_REQID, NULL, NULL, },
+#ifdef HAVE_IPTABLES
   { "nflog",  kv_conn,  kt_number,  KNCF_NFLOG_CONN, NULL, NULL, },
+#endif
 
   { "aggressive",  kv_conn,  kt_invertbool,  KNCF_AGGRMODE, NULL, NULL, },
   /* alias for compatibility - undocumented on purpose */
@@ -643,6 +655,12 @@ int parser_find_keyword(const char *s, YYSTYPE *lval)
 		break;
 	case kt_time:
 		keywordtype = TIMEWORD;
+		break;
+	case kt_binary:
+		keywordtype = BINARYWORD;
+		break;
+	case kt_byte:
+		keywordtype = BYTEWORD;
 		break;
 	case kt_comment:
 		keywordtype = COMMENT;
@@ -752,7 +770,7 @@ unsigned int parser_loose_enum(struct keyword *k, const char *s)
 	const struct keyword_def *kd = k->keydef;
 	unsigned int valresult;
 
-	assert(kd->type == kt_loose_enum || kd->type == kt_rsasigkey);
+	assert(kd->type == kt_loose_enum || kd->type == kt_pubkey);
 	assert(kd->validenum != NULL && kd->validenum != NULL);
 
 	const struct sparse_name *kev;

@@ -33,7 +33,6 @@
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/socket.h>
 #include <sys/un.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -51,8 +50,8 @@
 #include <event2/event_struct.h>
 #include <event2/thread.h>
 
-#include "sysdep.h"
-#include "socketwrapper.h"
+#include "lsw_socket.h"
+
 #include "constants.h"
 #include "defs.h"
 #include "state.h"
@@ -75,6 +74,7 @@
 #include "iface.h"
 #include "server_fork.h"
 #include "pluto_shutdown.h"
+#include "show.h"
 
 #ifdef USE_XFRM_INTERFACE
 #include "kernel_xfrm_interface.h"
@@ -84,7 +84,7 @@
 
 #include "lswfips.h"
 
-#ifdef HAVE_SECCOMP
+#ifdef USE_SECCOMP
 # include "pluto_seccomp.h"
 #endif
 
@@ -110,7 +110,7 @@ int ctl_fd = NULL_FD;   /* file descriptor of control (whack) socket */
 
 struct sockaddr_un ctl_addr = {
 	.sun_family = AF_UNIX,
-#if defined(HAS_SUN_LEN)
+#ifdef USE_SOCKADDR_LEN
 	.sun_len = sizeof(struct sockaddr_un),
 #endif
 	.sun_path = DEFAULT_CTL_SOCKET
@@ -125,13 +125,9 @@ struct sockaddr_un ctl_addr = {
 diag_t init_ctl_socket(struct logger *logger UNUSED/*maybe*/)
 {
 	delete_ctl_socket();    /* preventative medicine */
-	ctl_fd = safe_socket(AF_UNIX, SOCK_STREAM, 0);
+	ctl_fd = cloexec_socket(AF_UNIX, SOCK_STREAM, 0);
 	if (ctl_fd == -1) {
-		return diag_errno(errno, "could not create control socket: ");
-	}
-
-	if (fcntl(ctl_fd, F_SETFD, FD_CLOEXEC) == -1) {
-		return diag_errno(errno, "could not fcntl FD+CLOEXEC control socket: ");
+		return diag_errno(errno, "could not create control socket"/*: */);
 	}
 
 	/* to keep control socket secure, use umask */
@@ -144,7 +140,7 @@ diag_t init_ctl_socket(struct logger *logger UNUSED/*maybe*/)
 	if (bind(ctl_fd, (struct sockaddr *)&ctl_addr,
 		 offsetof(struct sockaddr_un, sun_path) +
 		 strlen(ctl_addr.sun_path)) < 0) {
-		return diag_errno(errno, "could not bind control socket: ");
+		return diag_errno(errno, "could not bind control socket"/*: */);
 	}
 	umask(ou);
 
@@ -167,7 +163,7 @@ diag_t init_ctl_socket(struct logger *logger UNUSED/*maybe*/)
 	 * Rumour has it that this is the max on BSD systems.
 	 */
 	if (listen(ctl_fd, 5) < 0) {
-		return diag_errno(errno, "could not listen on control socket: ");
+		return diag_errno(errno, "could not listen on control socket"/*: */);
 	}
 
 	return NULL;
@@ -194,7 +190,7 @@ enum global_ikev1_policy pluto_ikev1_pol =
 	GLOBAL_IKEv1_DROP;
 #endif
 
-#ifdef HAVE_SECCOMP
+#ifdef USE_SECCOMP
 enum seccomp_mode pluto_seccomp_mode = SECCOMP_DISABLED;
 #endif
 unsigned int pluto_max_halfopen = DEFAULT_MAXIMUM_HALFOPEN_IKE_SA;
@@ -266,7 +262,7 @@ static struct global_timer_desc global_timers[] = {
 	E(EVENT_CHECK_CRLS),
 	E(EVENT_REVIVE_CONNS),
 	E(EVENT_FREE_ROOT_CERTS),
-	E(EVENT_RESET_LOG_RATE_LIMIT),
+	E(EVENT_RESET_LOG_LIMITER),
 	E(EVENT_PROCESS_KERNEL_QUEUE),
 	E(EVENT_NAT_T_KEEPALIVE),
 #undef E
@@ -377,7 +373,7 @@ static void free_global_timers(void)
 	}
 }
 
-static void list_global_timers(struct show *s, monotime_t now)
+static void list_global_timers(struct show *s, const monotime_t now)
 {
 	for (unsigned u = 0; u < elemsof(global_timers); u++) {
 		struct global_timer_desc *gt = &global_timers[u];
@@ -416,7 +412,7 @@ struct signal_handler {
 
 static signal_handler_cb termhandler_cb;
 static signal_handler_cb huphandler_cb;
-#ifdef HAVE_SECCOMP
+#ifdef USE_SECCOMP
 static signal_handler_cb syshandler_cb;
 #endif
 
@@ -424,7 +420,7 @@ static struct signal_handler signal_handlers[] = {
 	{ .signal = SIGCHLD, .cb = server_fork_sigchld_handler, .persist = true, .name = "PLUTO_SIGCHLD", },
 	{ .signal = SIGTERM, .cb = termhandler_cb, .persist = false, .name = "PLUTO_SIGTERM", },
 	{ .signal = SIGHUP, .cb = huphandler_cb, .persist = true, .name = "PLUTO_SIGHUP", },
-#ifdef HAVE_SECCOMP
+#ifdef USE_SECCOMP
 	{ .signal = SIGSYS, .cb = syshandler_cb, .persist = true, .name = "PLUTO_SIGSYS", },
 #endif
 };
@@ -844,15 +840,17 @@ struct fd_accept_listener {
 };
 
 static void fd_accept_listener(struct evconnlistener *efc UNUSED,
-			       evutil_socket_t fd, struct sockaddr *sockaddr, int sockaddr_len,
+			       evutil_socket_t fd,
+			       struct sockaddr *sockaddr, int sockaddr_len,
 			       void *arg)
 {
 	struct logger logger[1] = { global_logger, }; /* event-handler */
 	struct fd_accept_listener *fdl = arg;
 	ip_sockaddr sa = {
 		.len = sockaddr_len,
-		.sa.sa = *sockaddr,
 	};
+	passert(sockaddr_len >= 0 && (size_t)sockaddr_len <= sizeof(sa.sa));
+	memcpy(&sa.sa, sockaddr, sockaddr_len);
 	fdl->cb(fd, &sa, fdl->arg, logger);
 }
 
@@ -886,7 +884,7 @@ void detach_fd_accept_listener(struct fd_accept_listener **fdl)
 /*
  * dump list of events to whacklog
  */
-void list_timers(struct show *s, monotime_t now)
+void list_timers(struct show *s, const monotime_t now)
 {
 	show_comment(s, "it is now: %jd seconds since monotonic epoch",
 		     monosecs(now));
@@ -936,7 +934,7 @@ static void termhandler_cb(struct logger *logger)
 	shutdown_pluto(logger, PLUTO_EXIT_OK);
 }
 
-#ifdef HAVE_SECCOMP
+#ifdef USE_SECCOMP
 static void syshandler_cb(struct logger *logger)
 {
 	llog(RC_LOG_SERIOUS, logger, "pluto received SIGSYS - possible SECCOMP violation!");
@@ -1046,7 +1044,7 @@ void run_server(char *conffile, struct logger *logger)
 	static const char addconn_path[] = IPSEC_EXECDIR "/addconn";
 	if (access(addconn_path, X_OK) < 0) {
 		fatal_errno(PLUTO_EXIT_FAIL, logger, errno,
-			    "%s: missing or not executable: ",
+			    "%s: missing or not executable",
 			    addconn_path);
 	}
 
@@ -1063,7 +1061,7 @@ void run_server(char *conffile, struct logger *logger)
 
 	/* parent continues */
 
-#ifdef HAVE_SECCOMP
+#ifdef USE_SECCOMP
 	init_seccomp_main(logger);
 #else
 	llog(RC_LOG, logger, "seccomp security not supported");

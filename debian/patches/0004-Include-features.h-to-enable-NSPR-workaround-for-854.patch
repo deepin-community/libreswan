@@ -1,0 +1,219 @@
+From: Daniel Kahn Gillmor <dkg@fifthhorseman.net>
+Date: Fri, 10 Mar 2023 15:45:29 -0500
+Subject: Include features.h to enable NSPR workaround for #854472 on  mipsel
+
+The upstream fix was only to enable the right linkage on mipsel when
+either __GLIBC__ or __UCLIBC__ were defined as preprocessor
+directives.  However, __GLIBC__ isn't defined unless <features.h> has
+been read, which was not the case in the files modified here.
+---
+ include/ike_alg.h                               | 1 +
+ include/lswnss.h                                | 1 +
+ include/test_buffer.h                           | 1 +
+ include/x509.h                                  | 1 +
+ lib/libswan/ike_alg_aes.c                       | 1 +
+ lib/libswan/ike_alg_encrypt_chacha20_poly1305.c | 1 +
+ lib/libswan/ike_alg_sha2.c                      | 1 +
+ lib/libswan/lswnss.c                            | 1 +
+ lib/libswan/pubkey_der_to_pubkey_content.c      | 1 +
+ lib/libswan/pubkey_ecdsa.c                      | 1 +
+ lib/libswan/pubkey_rsa.c                        | 1 +
+ lib/libswan/rnd.c                               | 1 +
+ lib/libswan/secret_pubkey_stuff_to_pubkey_der.c | 1 +
+ programs/cavp/test_gcm.c                        | 1 +
+ programs/pluto/ikev2_eap.c                      | 1 +
+ programs/pluto/root_certs.c                     | 1 +
+ 16 files changed, 16 insertions(+)
+
+diff --git a/include/ike_alg.h b/include/ike_alg.h
+index ee0bf09..9c4b311 100644
+--- a/include/ike_alg.h
++++ b/include/ike_alg.h
+@@ -17,6 +17,7 @@
+ #define IKE_ALG_H
+ 
+ #include <stdbool.h>	/* for bool */
++#include <features.h>
+ #include <pk11pub.h>
+ #include "shunk.h"
+ #include "ietf_constants.h"
+diff --git a/include/lswnss.h b/include/lswnss.h
+index f88fda8..7d4e0dd 100644
+--- a/include/lswnss.h
++++ b/include/lswnss.h
+@@ -17,6 +17,7 @@
+ #ifndef _LSWNSS_H_
+ #define _LSWNSS_H_
+ 
++#include <features.h>
+ #include <prerror.h>		/* for PRErrorCode, for PR_GetError() */
+ #include <pk11pub.h>
+ 
+diff --git a/include/test_buffer.h b/include/test_buffer.h
+index aad06ef..d5522a5 100644
+--- a/include/test_buffer.h
++++ b/include/test_buffer.h
+@@ -14,6 +14,7 @@
+  */
+ 
+ #include <stdbool.h>
++#include <features.h>
+ #include <pk11pub.h>
+ 
+ #include "chunk.h"
+diff --git a/include/x509.h b/include/x509.h
+index e1fb562..d8fa892 100644
+--- a/include/x509.h
++++ b/include/x509.h
+@@ -25,6 +25,7 @@
+ #ifndef _X509_H
+ #define _X509_H
+ 
++#include <features.h>
+ #include <cert.h>		/* dep:libnss3-dev */
+ 
+ #include "deltatime.h"
+diff --git a/lib/libswan/ike_alg_aes.c b/lib/libswan/ike_alg_aes.c
+index 309d84a..ef140ab 100644
+--- a/lib/libswan/ike_alg_aes.c
++++ b/lib/libswan/ike_alg_aes.c
+@@ -19,6 +19,7 @@
+  * for more details.
+  */
+ 
++#include <features.h>
+ #include <blapit.h>		/* for AES_BLOCK_SIZE */
+ 
+ #include "constants.h"		/* for BYTES_FOR_BITS() */
+diff --git a/lib/libswan/ike_alg_encrypt_chacha20_poly1305.c b/lib/libswan/ike_alg_encrypt_chacha20_poly1305.c
+index f04f55e..c9afed4 100644
+--- a/lib/libswan/ike_alg_encrypt_chacha20_poly1305.c
++++ b/lib/libswan/ike_alg_encrypt_chacha20_poly1305.c
+@@ -13,6 +13,7 @@
+  * for more details.
+  */
+ 
++#include <features.h>
+ #include <pkcs11.h>
+ 
+ #include "ike_alg.h"
+diff --git a/lib/libswan/ike_alg_sha2.c b/lib/libswan/ike_alg_sha2.c
+index 98cb946..6998d43 100644
+--- a/lib/libswan/ike_alg_sha2.c
++++ b/lib/libswan/ike_alg_sha2.c
+@@ -18,6 +18,7 @@
+  *
+  */
+ 
++#include <features.h>
+ #include <pkcs11t.h>
+ 
+ #include "constants.h"		/* for BYTES_FOR_BITS() */
+diff --git a/lib/libswan/lswnss.c b/lib/libswan/lswnss.c
+index 5b67c38..b7cc310 100644
+--- a/lib/libswan/lswnss.c
++++ b/lib/libswan/lswnss.c
+@@ -14,6 +14,7 @@
+  * for more details.
+  */
+ 
++#include <features.h>
+ #include <nspr.h>
+ #include <pk11pub.h>
+ #include <secmod.h>
+diff --git a/lib/libswan/pubkey_der_to_pubkey_content.c b/lib/libswan/pubkey_der_to_pubkey_content.c
+index 7d9b27e..279bbb9 100644
+--- a/lib/libswan/pubkey_der_to_pubkey_content.c
++++ b/lib/libswan/pubkey_der_to_pubkey_content.c
+@@ -13,6 +13,7 @@
+  * for more details.
+  */
+ 
++#include <features.h>
+ #include <keyhi.h>
+ 
+ #include "lswnss.h"
+diff --git a/lib/libswan/pubkey_ecdsa.c b/lib/libswan/pubkey_ecdsa.c
+index 29af07f..b542023 100644
+--- a/lib/libswan/pubkey_ecdsa.c
++++ b/lib/libswan/pubkey_ecdsa.c
+@@ -25,6 +25,7 @@
+  * for more details.
+  */
+ 
++#include <features.h>
+ #include <pk11pub.h>
+ #include <cryptohi.h>
+ #include <keyhi.h>
+diff --git a/lib/libswan/pubkey_rsa.c b/lib/libswan/pubkey_rsa.c
+index 38b44ab..97d06d0 100644
+--- a/lib/libswan/pubkey_rsa.c
++++ b/lib/libswan/pubkey_rsa.c
+@@ -25,6 +25,7 @@
+  * for more details.
+  */
+ 
++#include <features.h>
+ #include <cryptohi.h>
+ #include <keyhi.h>
+ 
+diff --git a/lib/libswan/rnd.c b/lib/libswan/rnd.c
+index 868df5f..cd46256 100644
+--- a/lib/libswan/rnd.c
++++ b/lib/libswan/rnd.c
+@@ -19,6 +19,7 @@
+  *
+  */
+ 
++#include <features.h>
+ #include <pk11pub.h>
+ 
+ #include "rnd.h"
+diff --git a/lib/libswan/secret_pubkey_stuff_to_pubkey_der.c b/lib/libswan/secret_pubkey_stuff_to_pubkey_der.c
+index 1b5de69..8a46a6d 100644
+--- a/lib/libswan/secret_pubkey_stuff_to_pubkey_der.c
++++ b/lib/libswan/secret_pubkey_stuff_to_pubkey_der.c
+@@ -13,6 +13,7 @@
+  * for more details.
+  */
+ 
++#include <features.h>
+ #include <keyhi.h>
+ 
+ #include "lswnss.h"
+diff --git a/programs/cavp/test_gcm.c b/programs/cavp/test_gcm.c
+index 44a03d1..457a4c3 100644
+--- a/programs/cavp/test_gcm.c
++++ b/programs/cavp/test_gcm.c
+@@ -14,6 +14,7 @@
+  * for more details.
+  */
+ 
++#include <features.h>
+ #include <pk11pub.h>
+ #include <blapit.h>
+ 
+diff --git a/programs/pluto/ikev2_eap.c b/programs/pluto/ikev2_eap.c
+index d7f0b1d..1c284e3 100644
+--- a/programs/pluto/ikev2_eap.c
++++ b/programs/pluto/ikev2_eap.c
+@@ -25,6 +25,7 @@
+  * - use helper thread to do NSS crypto?
+  */
+ 
++#include <features.h>
+ #include <ssl.h>
+ #include <prmem.h>
+ 
+diff --git a/programs/pluto/root_certs.c b/programs/pluto/root_certs.c
+index 08a85a6..cf42e90 100644
+--- a/programs/pluto/root_certs.c
++++ b/programs/pluto/root_certs.c
+@@ -16,6 +16,7 @@
+  *
+  */
+ 
++#include <features.h>
+ #include <cert.h>
+ 
+ #include "defs.h"

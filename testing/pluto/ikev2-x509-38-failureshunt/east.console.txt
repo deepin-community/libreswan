@@ -105,7 +105,7 @@ east #
 000 "failureshunt":   our auth:rsasig(RSASIG+RSASIG_v1_5), their auth:RSASIG+ECDSA+RSASIG_v1_5, our autheap:none, their autheap:none;
 000 "failureshunt":   modecfg info: us:none, them:none, modecfg policy:push, dns:unset, domains:unset, cat:unset;
 000 "failureshunt":   sec_label:unset;
-000 "failureshunt":   ike_life: 28800s; ipsec_life: 28800s; replay_window: 128; rekey_margin: 540s; rekey_fuzz: 100%; keyingtries: 0;
+000 "failureshunt":   ike_life: 28800s; ipsec_life: 28800s; ipsec_max_bytes: 2^63B; ipsec_max_packets: 2^63; replay_window: 128; rekey_margin: 540s; rekey_fuzz: 100%; keyingtries: 0;
 000 "failureshunt":   retransmit-interval: 9999ms; retransmit-timeout: 99s; iketcp:no; iketcp-port:4500;
 000 "failureshunt":   initial-contact:no; cisco-unity:no; fake-strongswan:no; send-vendorid:no; send-no-esp-tfc:no;
 000 "failureshunt":   policy: IKEv2+RSASIG+ECDSA+RSASIG_v1_5+ENCRYPT+TUNNEL+PFS+IKE_FRAG_ALLOW+ESN_NO+ESN_YES+failurePASS;
@@ -115,14 +115,14 @@ east #
 000 "failureshunt":   our idtype: ID_IPV4_ADDR; our id=192.1.2.23; their idtype: ID_IPV4_ADDR; their id=192.1.2.45
 000 "failureshunt":   liveness: passive; dpdaction:hold; dpddelay:0s; retransmit-timeout:60s
 000 "failureshunt":   nat-traversal: encaps:auto; keepalive:20s
-000 "failureshunt":   newest ISAKMP SA: #0; newest IPsec SA: #0; conn serial: $1;
+000 "failureshunt":   newest IKE SA: #0; newest IPsec SA: #0; conn serial: $1;
 000 "westnet-eastnet": 192.1.2.23...192.1.2.45; unrouted; eroute owner: #0
 000 "westnet-eastnet":     oriented; my_ip=unset; their_ip=unset; my_updown=ipsec _updown;
 000 "westnet-eastnet":   xauth us:none, xauth them:none,  my_username=[any]; their_username=[any]
 000 "westnet-eastnet":   our auth:rsasig(RSASIG+RSASIG_v1_5), their auth:RSASIG+ECDSA+RSASIG_v1_5, our autheap:none, their autheap:none;
 000 "westnet-eastnet":   modecfg info: us:none, them:none, modecfg policy:push, dns:unset, domains:unset, cat:unset;
 000 "westnet-eastnet":   sec_label:unset;
-000 "westnet-eastnet":   ike_life: 28800s; ipsec_life: 28800s; replay_window: 128; rekey_margin: 540s; rekey_fuzz: 100%; keyingtries: 0;
+000 "westnet-eastnet":   ike_life: 28800s; ipsec_life: 28800s; ipsec_max_bytes: 2^63B; ipsec_max_packets: 2^63; replay_window: 128; rekey_margin: 540s; rekey_fuzz: 100%; keyingtries: 0;
 000 "westnet-eastnet":   retransmit-interval: 9999ms; retransmit-timeout: 99s; iketcp:no; iketcp-port:4500;
 000 "westnet-eastnet":   initial-contact:no; cisco-unity:no; fake-strongswan:no; send-vendorid:no; send-no-esp-tfc:no;
 000 "westnet-eastnet":   policy: IKEv2+RSASIG+ECDSA+RSASIG_v1_5+ENCRYPT+TUNNEL+PFS+IKE_FRAG_ALLOW+ESN_NO+ESN_YES;
@@ -132,7 +132,7 @@ east #
 000 "westnet-eastnet":   our idtype: ID_IPV4_ADDR; our id=192.1.2.23; their idtype: ID_IPV4_ADDR; their id=192.1.2.45
 000 "westnet-eastnet":   liveness: passive; dpdaction:hold; dpddelay:0s; retransmit-timeout:60s
 000 "westnet-eastnet":   nat-traversal: encaps:auto; keepalive:20s
-000 "westnet-eastnet":   newest ISAKMP SA: #0; newest IPsec SA: #0; conn serial: $2;
+000 "westnet-eastnet":   newest IKE SA: #0; newest IPsec SA: #0; conn serial: $2;
 000  
 000 Total IPsec connections: loaded 2, active 0
 000  
@@ -152,7 +152,13 @@ XFRM state:
 XFRM policy:
 XFRM done
 IPSEC mangle TABLES
-NEW_IPSEC_CONN mangle TABLES
+iptables filter TABLE
+Chain INPUT (policy ACCEPT)
+target     prot opt source               destination         
+Chain FORWARD (policy ACCEPT)
+target     prot opt source               destination         
+Chain OUTPUT (policy ACCEPT)
+target     prot opt source               destination         
 ROUTING TABLES
 default via 192.1.2.254 dev eth1
 192.0.1.0/24 via 192.1.2.45 dev eth1

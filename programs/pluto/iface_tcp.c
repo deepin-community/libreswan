@@ -25,42 +25,27 @@
  *
  */
 
-#include <sys/types.h>
-#include <netinet/udp.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <unistd.h>
-
-#include <event2/listener.h>
+#include <unistd.h>		/* for read() */
 
 #include <netinet/tcp.h>	/* for TCP_ULP (hopefully) */
 #ifndef TCP_ULP
 #define TCP_ULP 31
 #endif
 
+#include "lsw_socket.h"		/* for cloexec_socket() */
 #include "ip_address.h"
 #include "ip_sockaddr.h"
 
 #include "defs.h"
-#include "kernel.h"
-#include "server.h"		/* for pluto_sock_bufsize */
+#include "kernel.h"		/* for kernel_ops.poke...() */
+#include "server.h"		/* for detach_fd_read_listener() */
 #include "iface.h"
-#include "demux.h"
+#include "demux.h"		/* for alloc_md() */
 #include "log.h"
 #include "ip_info.h"
-#include "nat_traversal.h"	/* for nat_traversal_enabled which seems like a broken idea */
 #include "pluto_stats.h"
-
-/* work around weird combo's of glibc and kernel header conflicts */
-#if defined(linux)
-# ifndef GLIBC_KERN_FLIP_HEADERS
-#  include "linux/xfrm.h" /* local (if configured) or system copy */
-#  include "libreswan.h"
-# else
-#  include "libreswan.h"
-#  include "linux/xfrm.h" /* local (if configured) or system copy */
-# endif
-#endif
 
 static void accept_ike_in_tcp_cb(int accepted_fd, ip_sockaddr *sockaddr,
 				 void *arg, struct logger *logger);
@@ -224,11 +209,8 @@ static struct msg_digest *read_espintcp_packet(const char *what,
 	packet_len -= sizeof(zero_esp_marker);
 	packet_ptr += sizeof(zero_esp_marker);
 
-	struct msg_digest *md = alloc_md(*ifp, &(*ifp)->iketcp_remote_endpoint, HERE);
-	init_pbs(&md->packet_pbs,
-		 clone_bytes(packet_ptr, packet_len,
-			     "message buffer in udp_read_packet()"),
-		 packet_len, "packet");
+	struct msg_digest *md = alloc_md(*ifp, &(*ifp)->iketcp_remote_endpoint,
+					 packet_ptr, packet_len, HERE);
 	return md;
 }
 
@@ -299,7 +281,6 @@ static struct msg_digest *iketcp_read_packet(struct iface_endpoint **ifp,
 		} else {
 
 			dbg_iketcp(*ifp, "enabling ESPINTCP");
-
 			if (setsockopt((*ifp)->fd, IPPROTO_TCP, TCP_ULP,
 				      "espintcp", sizeof("espintcp"))) {
 				int e = errno;
@@ -309,35 +290,13 @@ static struct msg_digest *iketcp_read_packet(struct iface_endpoint **ifp,
 				iketcp_shutdown(ifp); /* i.e., delete IFP */
 				return NULL;
 			}
-#if defined(linux)
-			int af = address_type(&(*ifp)->ip_dev->id_address)->af;
-			struct xfrm_userpolicy_info policy_in = {
-				.action = XFRM_POLICY_ALLOW,
-				.sel.family = af,
-				.dir = XFRM_POLICY_IN,
-			};
-			if (setsockopt((*ifp)->fd, IPPROTO_IP, IP_XFRM_POLICY, &policy_in, sizeof(policy_in))) {
-				int e = errno;
-				llog_iketcp(RC_LOG, logger, *ifp, e,
-					    "closing socket; setsockopt(%d, SOL_TCP, IP_XFRM_POLICY, \"policy_in\") failed: ",
-					    (*ifp)->fd);
-				iketcp_shutdown(ifp); /* i.e., delete IFP */
-				return NULL;
-			}
-			struct xfrm_userpolicy_info policy_out = {
-				.action = XFRM_POLICY_ALLOW,
-				.sel.family = af,
-				.dir = XFRM_POLICY_OUT,
-			};
-			if (setsockopt((*ifp)->fd, IPPROTO_IP, IP_XFRM_POLICY, &policy_out, sizeof(policy_out))) {
-				int e = errno;
-				llog_iketcp(RC_LOG, logger, *ifp, e,
-					    "closing socket; setsockopt(%d, SOL_TCP, IP_XFRM_POLICY, \"policy_out\") failed: ",
-					    (*ifp)->fd);
-				iketcp_shutdown(ifp); /* i.e., delete IFP */
-				return NULL;
-			}
-#endif
+		}
+
+		if (kernel_ops->poke_ipsec_policy_hole != NULL &&
+		    !kernel_ops->poke_ipsec_policy_hole((*ifp)->fd, address_type(&(*ifp)->ip_dev->id_address), logger)) {
+			/* already logged */
+			iketcp_shutdown(ifp); /* i.e., delete IFP */
+			return NULL;
 		}
 
 		/*
@@ -479,196 +438,38 @@ static void iketcp_listen(struct iface_endpoint *ifp,
 	}
 }
 
-static int bind_tcp_socket(const struct iface_dev *ifd, ip_port port,
-			   struct logger *logger)
-{
-	const ip_protocol *protocol = &ip_protocol_tcp;
-	ip_endpoint endpoint = endpoint_from_address_protocol_port(ifd->id_address, protocol, port);
-#define BIND_ERROR(MSG, ...)						\
-	{								\
-		int e = errno;						\
-		endpoint_buf eb;					\
-		log_errno(logger, e,					\
-			  "bind %s TCP endpoint %s failed, "MSG,	\
-			  ifd->id_rname, str_endpoint(&endpoint, &eb),	\
-			  ##__VA_ARGS__);				\
-	}
-
-	const struct ip_info *type = address_type(&ifd->id_address);
-	int fd = socket(type->pf, SOCK_STREAM, protocol->ipproto);
-	if (fd < 0) {
-		BIND_ERROR("socket(%s, SOCK_STREAM, %s)",
-			   type->pf_name, protocol->name);
-		return -1;
-	}
-
-	int fcntl_flags;
-	static const int on = true;     /* by-reference parameter; constant, we hope */
-
-	/* Set socket Nonblocking */
-	if ((fcntl_flags = fcntl(fd, F_GETFL)) >= 0) {
-		if (!(fcntl_flags & O_NONBLOCK)) {
-			fcntl_flags |= O_NONBLOCK;
-			if (fcntl(fd, F_SETFL, fcntl_flags) == -1) {
-				BIND_ERROR("fcntl(F_SETFL, O_NONBLOCK)");
-				/* stumble on */
-			}
-		}
-	}
-
-	if (fcntl(fd, F_SETFD, FD_CLOEXEC) == -1) {
-		BIND_ERROR("fcntl(F_SETFD, FD_CLOEXEC)");
-		close(fd);
-		return -1;
-	}
-
-	if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR,
-		       (const void *)&on, sizeof(on)) < 0) {
-		BIND_ERROR("setsockopt(SOL_SOCKET, SO_REUSEADDR)");
-		close(fd);
-		return -1;
-	}
-
-#ifdef SO_PRIORITY
-	static const int so_prio = 6; /* rumored maximum priority, might be 7 on linux? */
-	if (setsockopt(fd, SOL_SOCKET, SO_PRIORITY, (const void *)&so_prio,
-		       sizeof(so_prio)) < 0) {
-		BIND_ERROR("setsockopt(SOL_SOCKET, SO_PRIORITY)");
-		/* non-fatal */
-	}
-#endif
-
-	if (pluto_sock_bufsize != IKE_BUF_AUTO) {
-#if defined(linux)
-		/*
-		 * Override system maximum
-		 * Requires CAP_NET_ADMIN
-		 */
-		int so_rcv = SO_RCVBUFFORCE;
-		int so_snd = SO_SNDBUFFORCE;
-#else
-		int so_rcv = SO_RCVBUF;
-		int so_snd = SO_SNDBUF;
-#endif
-		if (setsockopt(fd, SOL_SOCKET, so_rcv, (const void *)&pluto_sock_bufsize,
-			       sizeof(pluto_sock_bufsize)) < 0) {
-			BIND_ERROR("setsockopt(SOL_SOCKET, SO_RCVBUFFORCE)");
-		}
-		if (setsockopt(fd, SOL_SOCKET, so_snd, (const void *)&pluto_sock_bufsize,
-			       sizeof(pluto_sock_bufsize)) < 0) {
-			BIND_ERROR("setsockopt(SOL_SOCKET, SO_SNDBUFFORCE)");
-		}
-	}
-
-	/* To improve error reporting.  See ip(7). */
-#if defined(IP_RECVERR) && defined(MSG_ERRQUEUE)
-	if (pluto_sock_errqueue) {
-		if (setsockopt(fd, SOL_IP, IP_RECVERR, (const void *)&on, sizeof(on)) < 0) {
-			BIND_ERROR("setsockopt(SOL_IP, IP_RECVERR)");
-			close(fd);
-			return -1;
-		}
-	}
-#endif
-
-	/*
-	 * With IPv6, there is no fragmentation after it leaves our
-	 * interface.  PMTU discovery is mandatory but doesn't work
-	 * well with IKE (why?).  So we must set the IPV6_USE_MIN_MTU
-	 * option.  See draft-ietf-ipngwg-rfc2292bis-01.txt 11.1
-	 */
-#ifdef IPV6_USE_MIN_MTU /* YUCK: not always defined */
-	if (address_type(&ifd->id_address) == &ipv6_info &&
-	    setsockopt(fd, IPPROTO_IPV6, IPV6_USE_MIN_MTU,
-		       (const void *)&on, sizeof(on)) < 0) {
-		BIND_ERROR("setsockopt(IPPROTO_IPV6, IPV6_USE_MIN_MTU)");
-		close(fd);
-		return -1;
-	}
-#endif
-
-	/*
-	 * NETKEY requires us to poke an IPsec policy hole that allows
-	 * IKE packets, unlike KLIPS which implicitly always allows
-	 * plaintext IKE.  This installs one IPsec policy per socket
-	 * but this function is called for each: IPv4 port 500 and
-	 * 4500 IPv6 port 500
-	 */
-	if (kernel_ops->poke_ipsec_policy_hole != NULL &&
-	    !kernel_ops->poke_ipsec_policy_hole(ifd, fd, logger)) {
-		/* already logged */
-		close(fd);
-		return -1;
-	}
-
-	/*
-	 * ??? does anyone care about the value of port of ifp->addr?
-	 * Old code seemed to assume that it should be reset to pluto_port.
-	 * But only on successful bind.  Seems wrong or unnecessary.
-	 */
-	ip_endpoint if_endpoint = endpoint_from_address_protocol_port(ifd->id_address,
-								      &ip_protocol_tcp,
-								      port);
-	ip_sockaddr if_sa = sockaddr_from_endpoint(if_endpoint);
-	if (bind(fd, &if_sa.sa.sa, if_sa.len) < 0) {
-		BIND_ERROR("bind()");
-		close(fd);
-		return -1;
-	}
-
-#if defined(HAVE_UDPFROMTO)
-	/* we are going to use udpfromto.c, so initialize it */
-	if (udpfromto_init(fd) == -1) {
-		log_errno(logger, errno,
-			  "udpfromto_init() returned an error - ignored");
-	}
-#endif
-
-	/* poke a hole for IKE messages in the IPsec layer */
-	if (kernel_ops->exceptsocket != NULL) {
-		if (!kernel_ops->exceptsocket(fd, AF_INET, logger)) {
-			/* already logged */
-			close(fd);
-			return -1;
-		}
-	}
-
-	return fd;
-#undef BIND_ERROR
-}
-
-static int iketcp_bind_iface_endpoint(struct iface_dev *ifd, ip_port port,
-				      bool unused_esp_encapsulation_enabled UNUSED,
-				      struct logger *logger)
-{
-	return bind_tcp_socket(ifd, port, logger);
-}
-
 const struct iface_io iketcp_iface_io = {
 	.protocol = &ip_protocol_tcp,
+	.socket = {
+		.type = SOCK_STREAM,
+		.type_name = "SOCK_STREAM",
+	},
 	.send_keepalive = false,
 	.read_packet = iketcp_read_packet,
 	.write_packet = iketcp_write_packet,
 	.cleanup = iketcp_cleanup,
 	.listen = iketcp_listen,
-	.bind_iface_endpoint = iketcp_bind_iface_endpoint,
 };
 
 /*
  * Open a TCP socket connected to st_remote_endpoint.
  *
+ * TCP: THIS IS A BLOCKING CALL
+ *
  * Since this end is opening the socket, this end is responsible for
  * sending the IKE-in-TCP magic word.
  */
 
-struct iface_endpoint *open_tcp_endpoint(struct iface_dev *local_dev,
-					 ip_endpoint remote_endpoint,
-					 struct logger *logger)
+struct iface_endpoint *connect_to_tcp_endpoint(struct iface_dev *local_dev,
+					       ip_endpoint remote_endpoint,
+					       struct logger *logger)
 {
 	dbg("TCP: opening socket");
-	int fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	const struct ip_info *afi = endpoint_type(&remote_endpoint);
+	int fd = cloexec_socket(afi->socket.domain, SOCK_STREAM, IPPROTO_TCP);
 	if (fd < 0) {
-		log_errno(logger, errno, "TCP: socket() failed");
+		llog_error(logger, errno, "TCP: cloexec_socket(%s,SOCK_STREAM,IPPROTO_TCP) failed",
+			   afi->socket.domain_name);
 		return NULL;
 	}
 
@@ -684,7 +485,7 @@ struct iface_endpoint *open_tcp_endpoint(struct iface_dev *local_dev,
 	dbg("TCP: socket %d: connecting to other end", fd);
 	ip_sockaddr remote_sockaddr = sockaddr_from_endpoint(remote_endpoint);
 	if (connect(fd, &remote_sockaddr.sa.sa, remote_sockaddr.len) < 0) {
-		log_errno(logger, errno, "TCP: connect(%d) failed", fd);
+		llog_error(logger, errno, "TCP: connect(%d) failed", fd);
 		close(fd);
 		return NULL;
 	}
@@ -697,7 +498,7 @@ struct iface_endpoint *open_tcp_endpoint(struct iface_dev *local_dev,
 			.len = sizeof(local_sockaddr.sa),
 		};
 		if (getsockname(fd, &local_sockaddr.sa.sa, &local_sockaddr.len) < 0) {
-			log_errno(logger, errno, "TCP: socket %d: failed to get local TCP address from socket", fd);
+			llog_error(logger, errno, "TCP: socket %d: failed to get local TCP address from socket", fd);
 			close(fd);
 			return NULL;
 		}
@@ -723,8 +524,8 @@ struct iface_endpoint *open_tcp_endpoint(struct iface_dev *local_dev,
 		dbg("TCP: socket %d: sending IKE-in-TCP prefix", fd);
 		const uint8_t iketcp[] = IKE_IN_TCP_PREFIX;
 		if (write(fd, iketcp, sizeof(iketcp)) != (ssize_t)sizeof(iketcp)) {
-			log_errno(logger, errno,
-				  "TCP: socket %d: send of IKE-in-TCP prefix failed", fd);
+			llog_error(logger, errno,
+				   "TCP: socket %d: send of IKE-in-TCP prefix failed", fd);
 			close(fd);
 			return NULL;
 		}
@@ -739,39 +540,22 @@ struct iface_endpoint *open_tcp_endpoint(struct iface_dev *local_dev,
 	 */
 	if (impair.tcp_skip_setsockopt_espintcp) {
 		llog(RC_LOG, logger, "IMPAIR: TCP: skipping setsockopt(espintcp)");
-#if defined(linux)
 	} else {
-		int af = endpoint_type(&remote_endpoint)->af;
-		struct xfrm_userpolicy_info policy_in = {
-			.action = XFRM_POLICY_ALLOW,
-			.sel.family = af,
-			.dir = XFRM_POLICY_IN,
-		};
-		struct xfrm_userpolicy_info policy_out = {
-			.action = XFRM_POLICY_ALLOW,
-			.sel.family = af,
-			.dir = XFRM_POLICY_OUT,
-		};
 		dbg("TCP: socket %d: enabling \"espintcp\"", fd);
 		if (setsockopt(fd, IPPROTO_TCP, TCP_ULP, "espintcp", sizeof("espintcp"))) {
-			log_errno(logger, errno,
-				  "setsockopt(SOL_TCP, TCP_ULP) failed in netlink_espintcp()");
+			llog_error(logger, errno,
+				   "setsockopt(SOL_TCP, TCP_ULP) failed "PRI_WHERE,
+				   pri_where(HERE));
 			close(fd);
 			return NULL;
 		}
-		if (setsockopt(fd, IPPROTO_IP, IP_XFRM_POLICY, &policy_in, sizeof(policy_in))) {
-			log_errno(logger, errno,
-				  "setsockopt(PPROTO_IP, IP_XFRM_POLICY(in)) failed in netlink_espintcp()");
-			close(fd);
-			return NULL;
-		}
-		if (setsockopt(fd, IPPROTO_IP, IP_XFRM_POLICY, &policy_out, sizeof(policy_out))) {
-			log_errno(logger, errno,
-				  "setsockopt(PPROTO_IP, IP_XFRM_POLICY(out)) failed in netlink_espintcp()");
-			close(fd);
-			return NULL;
-		}
-#endif
+	}
+
+	if (kernel_ops->poke_ipsec_policy_hole != NULL &&
+	    !kernel_ops->poke_ipsec_policy_hole(fd, afi, logger)) {
+		/* already logged */
+		close(fd);
+		return NULL;
 	}
 
 	struct iface_endpoint *ifp =

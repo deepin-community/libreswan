@@ -5,7 +5,7 @@
 :start
 
 # [ 111.628924] -> [00.00]
-s/\[\s\+[0-9]\+\.[0-9]\+\] /[ 00.00] /
+s/\[\s*[0-9]\+\.[0-9]\+\] /[ 00.00] /
 
 # Only zap select kernel error messages.  Unexpected messages or
 # messages involving aliens are not zapped.  Use [00.00] to anchor the
@@ -27,6 +27,7 @@ s/\[\s\+[0-9]\+\.[0-9]\+\] /[ 00.00] /
 /\[ 00.00] audit: / b zap
 /\[ 00.00] Bluetooth: / b zap # yes, apparently NIC has Bluetooth
 /\[ 00.00] .*: performance on this CPU would be suboptimal/ b zap
+/\[ 00.00] .* used greatest stack depth: [0-9]* bytes left/ b zap
 
 b
 
@@ -44,9 +45,9 @@ b
 #
 # Do this by joining the two lines and then zapping the message
 
-# Form: This a [00.00] KERNEL MESSAGE\nline
+# Form: This a [ 00.00] KERNEL MESSAGE\nline
 N
-# Zap: [00.00 KERNEL MESSAGE\n
+# Zap: [ 00.00 KERNEL MESSAGE\n
 s/\[ 00.00] [^\n]*\n//
 
 # Was the next line also a kernel message.

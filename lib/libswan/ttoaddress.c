@@ -99,9 +99,12 @@ static bool tryhex(shunk_t hex,
 	}
 
 	uintmax_t ul;
-	err_t err = shunk_to_uintmax(hex, NULL, 16, &ul, UINT32_MAX);
+	err_t err = shunk_to_uintmax(hex, NULL, 16, &ul);
 	if (err != NULL) {
 		return false;
+	}
+	if (ul > UINT32_MAX) {
+		return false; /* IPv4 is 32-bit */
 	}
 
 	struct in_addr addr = { htonl(ul), };
@@ -126,7 +129,7 @@ static bool tryhex(shunk_t hex,
 
 static err_t trydotted(shunk_t src, ip_address *dst)
 {
-	struct ip_bytes bytes = unset_bytes;
+	struct ip_bytes bytes = unset_ip_bytes;
 
 	shunk_t cursor = src;
 	for (unsigned b = 0; b < 4 && cursor.ptr != NULL /* more-input */; b++) {
@@ -176,10 +179,10 @@ static err_t trydotted(shunk_t src, ip_address *dst)
 			base = 16;
 		}
 		uintmax_t byte;
-		err_t err = shunk_to_uintmax(token, NULL, base, &byte, 0/*no-celing*/);
+		err_t err = shunk_to_uintmax(token, NULL, base, &byte);
 #else
 		uintmax_t byte;
-		err_t err = shunk_to_uintmax(token, NULL, 0, &byte, 0/*no-celing*/);
+		err_t err = shunk_to_uintmax(token, NULL, 0, &byte);
 #endif
 		if (err != NULL) {
 			return err;
@@ -237,13 +240,14 @@ static err_t trydotted(shunk_t src, ip_address *dst)
 static err_t colon(shunk_t src, ip_address *dst)
 {
 	shunk_t cursor = src;
-	struct ip_bytes u = unset_bytes;
+	struct ip_bytes u = unset_ip_bytes;
 #       define  IT      "IPv6 numeric address"
 
 	int gapat = -1;	/* where was empty piece seen */
 	unsigned colon_count = 0;
 	unsigned i = 0;
-	while (i < sizeof(u.byte) && cursor.len > 0) {
+	/* while there is more to parse and room for a pair of octets ... */
+	while (cursor.len > 0 && i <= sizeof(u.byte) - 2) {
 
 		/* all paths needs to make progress or return */
 
@@ -265,9 +269,12 @@ static err_t colon(shunk_t src, ip_address *dst)
 			/* parsing: NNNN[:...] */
 			colon_count = 0;
 			uintmax_t value;
-			err_t oops = shunk_to_uintmax(cursor, &cursor, 16, &value, 65535);
+			err_t oops = shunk_to_uintmax(cursor, &cursor, 16, &value);
 			if (oops != NULL) {
 				return oops;
+			}
+			if (value > 65535) {
+				return "too large";
 			}
 
 			/* network order */

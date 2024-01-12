@@ -30,13 +30,13 @@ west #
 fired and forgotten
 west #
  ../../guestbin/wait-for.sh --match v6-transport -- ipsec whack --trafficstatus
-006 #2: "v6-transport", type=ESP, add_time=1234567890, inBytes=0, outBytes=0, id='@east'
+006 #2: "v6-transport", type=ESP, add_time=1234567890, inBytes=0, outBytes=0, maxBytes=2^63B, id='@east'
 west #
  ../../guestbin/ping-once.sh --up -I 2001:db8:1:2::45 2001:db8:1:2::23
 up
 west #
  ipsec whack --trafficstatus
-006 #2: "v6-transport", type=ESP, add_time=1234567890, inBytes=64, outBytes=64, id='@east'
+006 #2: "v6-transport", type=ESP, add_time=1234567890, inBytes=64, outBytes=64, maxBytes=2^63B, id='@east'
 west #
  ../../guestbin/ipsec-look.sh
 west NOW
@@ -88,7 +88,13 @@ src ::/0 dst ::/0 proto ipv6-icmp type 136
 	dir out priority PRIORITY ptype main
 XFRM done
 IPSEC mangle TABLES
-NEW_IPSEC_CONN mangle TABLES
+iptables filter TABLE
+Chain INPUT (policy ACCEPT)
+target     prot opt source               destination         
+Chain FORWARD (policy ACCEPT)
+target     prot opt source               destination         
+Chain OUTPUT (policy ACCEPT)
+target     prot opt source               destination         
 ROUTING TABLES
 default via 192.1.2.254 dev eth1
 192.0.1.0/24 dev eth0 proto kernel scope link src 192.0.1.254
@@ -157,7 +163,13 @@ src ::/0 dst ::/0 proto ipv6-icmp type 136
 	dir out priority PRIORITY ptype main
 XFRM done
 IPSEC mangle TABLES
-NEW_IPSEC_CONN mangle TABLES
+iptables filter TABLE
+Chain INPUT (policy ACCEPT)
+target     prot opt source               destination         
+Chain FORWARD (policy ACCEPT)
+target     prot opt source               destination         
+Chain OUTPUT (policy ACCEPT)
+target     prot opt source               destination         
 ROUTING TABLES
 default via 192.1.2.254 dev eth1
 192.0.1.0/24 dev eth0 proto kernel scope link src 192.0.1.254
